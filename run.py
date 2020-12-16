@@ -10,6 +10,21 @@ import PIL.Image
 import numpy as np
 import time
 
+fgsm = None
+lbfgs = None
+
+
+from cleverhans.attacks import FastGradientMethod
+from cleverhans.attacks import LBFGS
+from cleverhans.compat import flags
+from cleverhans.dataset import MNIST
+from cleverhans.loss import CrossEntropy
+from cleverhans.train import train
+from cleverhans.utils import AccuracyReport
+from cleverhans.utils_keras import cnn_model
+from cleverhans.utils_keras import KerasModelWrapper
+from cleverhans.utils_tf import model_eval
+
 # datasets in the AutoAugment paper:
 # CIFAR-10, CIFAR-100, SVHN, and ImageNet
 # SVHN = http://ufldl.stanford.edu/housenumbers/
@@ -31,7 +46,6 @@ def get_dataset(dataset, reduced):
 
 (Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
 transformations = get_transformations(Xtr)
-
 # Experiment parameters
 
 LSTM_UNITS = 100
@@ -39,7 +53,7 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 16
+OP_TYPES = 2
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
@@ -155,13 +169,20 @@ class Controller:
         dummy_input = np.zeros((1, size, 1), np.float32)
         #没用的输入
         softmaxes = self.model.predict(dummy_input)
+        print("softmaxes")
+        print(softmaxes)
+        print("shape")
+        print(len(softmaxes))
         # convert softmaxes into subpolicies
         subpolicies = []
         for i in range(SUBPOLICIES):
             operations = []
             for j in range(SUBPOLICY_OPS):
                 op = softmaxes[j*3:(j+1)*3]
+                print("op")
+                print(op)
                 op = [o[0, i, :] for o in op]
+                print(op)
                 operations.append(Operation(*op))
             subpolicies.append(Subpolicy(*operations))
         return softmaxes, subpolicies
@@ -202,16 +223,19 @@ class Child:
     def fit(self, subpolicies, X, y):
         gen = autoaugment(subpolicies, X, y)
         self.model.fit_generator(
-            gen, CHILD_BATCHES, CHILD_EPOCHS, verbose=1, use_multiprocessing=False)
+            gen, CHILD_BATCHES, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
         return self
 
     def evaluate(self, X, y):
         return self.model.evaluate(X, y, verbose=0)[1]
 
+
 mem_softmaxes = []
 mem_accuracies = []
 
 controller = Controller()
+
+
 
 for epoch in range(CONTROLLER_EPOCHS):
     print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
@@ -222,6 +246,12 @@ for epoch in range(CONTROLLER_EPOCHS):
         print(subpolicy)
     mem_softmaxes.append(softmaxes)
     child = Child(Xtr.shape[1:])#(32,32,3)
+
+    wrap = KerasModelWrapper(child.model)
+    fgsm = FastGradientMethod(wrap, sess=session)
+    lbfgs = LBFGS(wrap, sess=session)
+
+
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
