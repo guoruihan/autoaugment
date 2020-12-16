@@ -64,7 +64,7 @@ CHILD_EPOCHS = 120
 CONTROLLER_EPOCHS = 500 # 15000 or 20000
 
 class Operation:
-    def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False):
+    def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False, model):
         # Ekin Dogus says he sampled the softmaxes, and has not used argmax
         # We might still want to use argmax=True for the last predictions, to ensure
         # the best solutions are chosen and make it deterministic.
@@ -79,6 +79,7 @@ class Operation:
             t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
+        self.model = model
         self.transformation = t[0]
 
     def __call__(self, X):
@@ -86,7 +87,7 @@ class Operation:
         for x in X:
             if np.random.rand() < self.prob:
                 x = PIL.Image.fromarray(x)
-                x = self.transformation(x, self.magnitude)
+                x = self.transformation(x, self.magnitude, self.model)
             _X.append(np.array(x))
         return np.array(_X)
 
@@ -250,7 +251,7 @@ for epoch in range(CONTROLLER_EPOCHS):
     wrap = KerasModelWrapper(child.model)
     fgsm = FastGradientMethod(wrap, sess=session)
     lbfgs = LBFGS(wrap, sess=session)
-
+    cwl2 = CarliniWagnerL2(wrap, sess=session)
 
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)

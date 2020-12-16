@@ -33,12 +33,29 @@ def LBFGS(img, eps, lbfgs):
     lbfgs_params = {'eps': eps}
     return lbfgs.generate(img, **lbfgs_params)
 
+def CWL2(img, eps, cwl2):
+    cwl2_params = {'confidence': eps} # 在所有参数中感觉是这个比较接近强度
+    return cwl2.generate(img, **cwl2_params)
+
+def DF(img, eps, df):
+    df_params = {'clip_min':0., 'clip_max':eps} #感觉没有找到强度就用eps界定上下界了
+    return df.generate(img, **df_params)
+
+def ENM(img, eps, enm):
+    enm_params = {'confidence' : eps}
+    return enm.generate(img, **enm_params)
+
+
 
 
 def get_transformations():
     return [
         (FGSM, 0, 1.0),
         (LBFGS, 0, 1.0),
+        (CWL2, 0, 1.0),
+        (DF, 0, 1.0),
+        (ENM, 0, 1.0),
+        
     ]
 
 if __name__ == '__main__':
