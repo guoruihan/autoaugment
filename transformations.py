@@ -2,6 +2,7 @@ import PIL, PIL.ImageOps, PIL.ImageEnhance, PIL.ImageDraw
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+import run
 
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.compat import flags
@@ -12,7 +13,7 @@ from cleverhans.utils import AccuracyReport
 from cleverhans.utils_keras import cnn_model
 from cleverhans.utils_keras import KerasModelWrapper
 from cleverhans.utils_tf import model_eval
-
+import run
 
 from scipy.io import loadmat
 
@@ -24,26 +25,30 @@ def SamplePairing(imgs):  # [0, 0.4]
         return PIL.Image.blend(img1, img2, v)
     return f
 
-def FGSM(img, eps, fgsm):
+def FGSM(img, eps):
     fgsm_params = {'eps': eps}
     return fgsm.generate(img, **fgsm_params)
 
 
-def LBFGS(img, eps, lbfgs):
+def LBFGS(img, eps):
     lbfgs_params = {'eps': eps}
     return lbfgs.generate(img, **lbfgs_params)
 
-def CWL2(img, eps, cwl2):
+def CWL2(img, eps):
     cwl2_params = {'confidence': eps} # 在所有参数中感觉是这个比较接近强度
     return cwl2.generate(img, **cwl2_params)
 
-def DF(img, eps, df):
+def DF(img, eps):
     df_params = {'clip_min':0., 'clip_max':eps} #感觉没有找到强度就用eps界定上下界了
     return df.generate(img, **df_params)
 
-def ENM(img, eps, enm):
+def ENM(img, eps):
     enm_params = {'confidence' : eps}
     return enm.generate(img, **enm_params)
+
+def MIM(img, eps):
+    mim_params = {'eps': eps}
+    return mim.generate(img, **mim_params)
 
 
 
@@ -55,7 +60,7 @@ def get_transformations():
         (CWL2, 0, 1.0),
         (DF, 0, 1.0),
         (ENM, 0, 1.0),
-        
+        (MIM, 0, 1.0),
     ]
 
 if __name__ == '__main__':
