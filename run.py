@@ -8,7 +8,9 @@ import cleverhans
 from tensorflow.python.client import device_lib
 print(device_lib.list_local_devices())
 print(tf.test.is_built_with_cuda())
-from keras import models, layers, datasets, utils, backend, optimizers, initializers
+
+
+from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
 backend.set_session(session)
 from transformations import get_transformations
 import PIL.Image
@@ -58,7 +60,7 @@ def get_dataset(dataset, reduced):
     return (Xtr, ytr), (Xts, yts)
 
 (Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
-transformations = get_transformations(Xtr)
+transformations = get_transformations()
 # Experiment parameters
 
 LSTM_UNITS = 100
@@ -66,7 +68,7 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 2
+OP_TYPES = 5
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
@@ -75,6 +77,14 @@ CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//'
 
 CHILD_EPOCHS = 12
 CONTROLLER_EPOCHS = 5 # 15000 or 20000
+model_map = {
+        'fgsm' : fgsm,
+        'lbfgs' : lbfgs,
+        'cwl2' : cwl2,
+        'df' : df,
+        'enm' : enm,
+        'mim' : mim
+    }
 
 class Operation:
     def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False):
@@ -92,6 +102,22 @@ class Operation:
             t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
+
+            if(t[3] == 'fgsm'):
+                self.model = fgsm
+            elif(t[3] == 'lbfgs'):
+                self.model = lbfgs
+            elif(t[3] == 'cwl2'):
+                self.model = cwl2
+            elif(t[3] == 'df'):
+                self.model = df
+            elif(t[3] == 'enm'):
+                self.model = enm
+            elif(t[3] == 'mim'):
+                self.model = mim
+            else:
+                assert(0)
+            #self.model = model_map.get(t[3])
         self.transformation = t[0]
 
     def __call__(self, X):
@@ -99,7 +125,15 @@ class Operation:
         for x in X:
             if np.random.rand() < self.prob:
                 x = PIL.Image.fromarray(x)
-                x = self.transformation(x, self.magnitude)
+
+                image_resize = tf.image.resize_images(x, [32, 32])
+                image_resize.set_shape([32, 32, 3])
+                image_resize = tf.expand_dims(image_resize,0)
+                x = image_resize
+                #print(x)
+                #assert(0)
+
+                x = self.transformation(x, self.magnitude, self.model)
             _X.append(np.array(x))
         return np.array(_X)
 
@@ -162,7 +196,7 @@ class Controller:
         return models.Model(input_layer, outputs)
 
     def fit(self, mem_softmaxes, mem_accuracies):
-        session = backend.get_session() #我们在session里面计算tensor
+        #session = backend.get_session() #我们在session里面计算tensor
         min_acc = np.min(mem_accuracies)
         max_acc = np.max(mem_accuracies)
         dummy_input = np.zeros((1, SUBPOLICIES, 1))
@@ -252,13 +286,7 @@ controller = Controller()
 
 
 for epoch in range(CONTROLLER_EPOCHS):
-    print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
 
-    softmaxes, subpolicies = controller.predict(SUBPOLICIES)
-    for i, subpolicy in enumerate(subpolicies):
-        print('# Sub-policy %d' % (i+1))
-        print(subpolicy)
-    mem_softmaxes.append(softmaxes)
     child = Child(Xtr.shape[1:])#(32,32,3)
 
     wrap = KerasModelWrapper(child.model)
@@ -269,6 +297,21 @@ for epoch in range(CONTROLLER_EPOCHS):
     enm = ElasticNetMethod(wrap, sess=session)
     mim = MomentumIterativeMethod(wrap, sess=session)
 
+    model_map = {
+        'fgsm': fgsm,
+        'lbfgs': lbfgs,
+        'cwl2': cwl2,
+        'df': df,
+        'enm': enm,
+        'mim': mim
+    }
+
+    print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
+    softmaxes, subpolicies = controller.predict(SUBPOLICIES)
+    for i, subpolicy in enumerate(subpolicies):
+        print('# Sub-policy %d' % (i+1))
+        print(subpolicy)
+    mem_softmaxes.append(softmaxes)
 
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)

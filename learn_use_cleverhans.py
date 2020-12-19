@@ -87,6 +87,20 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
   # Define input TF placeholder
   x = tf.placeholder(tf.float32, shape=(None, img_rows, img_cols,
                                         nchannels))
+  print(x)
+  print("fuck")
+
+  model = cnn_model(img_rows=img_rows, img_cols=img_cols,
+                    channels=nchannels, nb_filters=64,
+                    nb_classes=nb_classes)
+  wrap = KerasModelWrapper(model)
+  fgsm = FastGradientMethod(wrap, sess=sess)
+  fgsm_params = {'eps': 0.3,
+                 'clip_min': 0.,
+                 'clip_max': 1.}
+  adv_x = fgsm.generate(x, **fgsm_params)
+  print(adv_x)
+  assert(0)
   y = tf.placeholder(tf.float32, shape=(None, nb_classes))
 
   # Define TF model graph
