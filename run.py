@@ -135,19 +135,23 @@ class Operation:
                 x = tf.cast(x, tf.float32)
                 #print(x)
                 #assert(0)
-                print(tf.get_default_graph())
-                print(x.graph)
-                print("what's the hell")
-                print(session.graph)
+                # print(tf.get_default_graph())
+                # print(x.graph)
+                # print("what's the hell")
+                # print(session.graph)
                 #x = self.transformation(x, self.magnitude, self.model)
 
                 #tmp tag
+                #print(x)
                 fgsm = FastGradientMethod(self.model)
                 fgsm_params = {'eps': self.magnitude}
                 x = fgsm.generate(x, **fgsm_params)
                 #assert(0)
-
-            _X.append(np.array(x))
+            if(isinstance(x,tf.Tensor)):
+                with session.as_default():
+                    x = x.eval()
+            with session.as_default():
+                _X.append(np.array(x))
         return np.array(_X)
 
     def __str__(self):
