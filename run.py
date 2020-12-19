@@ -1,8 +1,10 @@
 import tensorflow as tf
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-session = tf.compat.v1.Session(config=config)
-
+tf.Graph().as_default()
+session = tf.compat.v1.Session(graph=tf.get_default_graph(),config=config)
+print(tf.get_default_graph())
+print(session.graph)
 import cleverhans
 
 from tensorflow.python.client import device_lib
@@ -103,20 +105,21 @@ class Operation:
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
 
-            if(t[3] == 'fgsm'):
-                self.model = fgsm
-            elif(t[3] == 'lbfgs'):
-                self.model = lbfgs
-            elif(t[3] == 'cwl2'):
-                self.model = cwl2
-            elif(t[3] == 'df'):
-                self.model = df
-            elif(t[3] == 'enm'):
-                self.model = enm
-            elif(t[3] == 'mim'):
-                self.model = mim
-            else:
-                assert(0)
+            # if(t[3] == 'fgsm'):
+            #     self.model = fgsm
+            # elif(t[3] == 'lbfgs'):
+            #     self.model = lbfgs
+            # elif(t[3] == 'cwl2'):
+            #     self.model = cwl2
+            # elif(t[3] == 'df'):
+            #     self.model = df
+            # elif(t[3] == 'enm'):
+            #     self.model = enm
+            # elif(t[3] == 'mim'):
+            #     self.model = mim
+            # else:
+            #     assert(0)
+            self.model = wrap
             #self.model = model_map.get(t[3])
         self.transformation = t[0]
 
@@ -124,16 +127,26 @@ class Operation:
         _X = []
         for x in X:
             if np.random.rand() < self.prob:
+                #with session.graph.as_default():
                 x = PIL.Image.fromarray(x)
-
-                image_resize = tf.image.resize_images(x, [32, 32])
-                image_resize.set_shape([32, 32, 3])
-                image_resize = tf.expand_dims(image_resize,0)
-                x = image_resize
+                x = tf.image.resize_images(x, [32, 32])
+                x.set_shape([32, 32, 3])
+                x = tf.expand_dims(x,0)
+                x = tf.cast(x, tf.float32)
                 #print(x)
                 #assert(0)
+                print(tf.get_default_graph())
+                print(x.graph)
+                print("what's the hell")
+                print(session.graph)
+                #x = self.transformation(x, self.magnitude, self.model)
 
-                x = self.transformation(x, self.magnitude, self.model)
+                #tmp tag
+                fgsm = FastGradientMethod(self.model)
+                fgsm_params = {'eps': self.magnitude}
+                x = fgsm.generate(x, **fgsm_params)
+                #assert(0)
+
             _X.append(np.array(x))
         return np.array(_X)
 
@@ -216,23 +229,23 @@ class Controller:
         dummy_input = np.zeros((1, size, 1), np.float32)
         #没用的输入
         softmaxes = self.model.predict(dummy_input)
-        print("softmaxes")
-        print(softmaxes)
-        print("shape")
-        print(len(softmaxes))
+        # print("softmaxes")
+        # print(softmaxes)
+        # print("shape")
+        # print(len(softmaxes))
         # convert softmaxes into subpolicies
         subpolicies = []
         for i in range(SUBPOLICIES):
             operations = []
             for j in range(SUBPOLICY_OPS):
                 op = softmaxes[j*3:(j+1)*3]
-                print("op")
-                print(op)
+                #print("op")
+                #print(op)
                 op = [o[0, i, :] for o in op]
-                print(op)
+                #print(op)
                 operations.append(Operation(*op))
             subpolicies.append(Subpolicy(*operations))
-        print(subpolicies)
+        #print(subpolicies)
         return softmaxes, subpolicies
 
 # generator
@@ -269,9 +282,11 @@ class Child:
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
-        gen = autoaugment(subpolicies, X, y)
-        self.model.fit_generator(
-            gen, CHILD_BATCHES, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
+        X = subpolicy(X)
+        X = X.astype(np.float32) / 255  # select from middle and put some subpolicy on that
+
+        print("base:",tf.get_default_graph())
+        self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
         return self
 
     def evaluate(self, X, y):
@@ -290,12 +305,12 @@ for epoch in range(CONTROLLER_EPOCHS):
     child = Child(Xtr.shape[1:])#(32,32,3)
 
     wrap = KerasModelWrapper(child.model)
-    fgsm = FastGradientMethod(wrap, sess=session)
-    lbfgs = LBFGS(wrap, sess=session)
-    cwl2 = CarliniWagnerL2(wrap, sess=session)
-    df = DeepFool(wrap, sess=session)
-    enm = ElasticNetMethod(wrap, sess=session)
-    mim = MomentumIterativeMethod(wrap, sess=session)
+    # fgsm = FastGradientMethod(wrap, sess=session)
+    # lbfgs = LBFGS(wrap, sess=session)
+    # cwl2 = CarliniWagnerL2(wrap, sess=session)
+    # df = DeepFool(wrap, sess=session)
+    # enm = ElasticNetMethod(wrap, sess=session)
+    # mim = MomentumIterativeMethod(wrap, sess=session)
 
     model_map = {
         'fgsm': fgsm,
@@ -312,6 +327,8 @@ for epoch in range(CONTROLLER_EPOCHS):
         print('# Sub-policy %d' % (i+1))
         print(subpolicy)
     mem_softmaxes.append(softmaxes)
+
+
 
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)

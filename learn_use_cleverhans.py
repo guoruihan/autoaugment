@@ -87,8 +87,6 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
   # Define input TF placeholder
   x = tf.placeholder(tf.float32, shape=(None, img_rows, img_cols,
                                         nchannels))
-  print(x)
-  print("fuck")
 
   model = cnn_model(img_rows=img_rows, img_cols=img_cols,
                     channels=nchannels, nb_filters=64,
@@ -98,7 +96,11 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
   fgsm_params = {'eps': 0.3,
                  'clip_min': 0.,
                  'clip_max': 1.}
+  print(tf.get_default_graph())
   adv_x = fgsm.generate(x, **fgsm_params)
+  print(x)
+  print(tf.get_default_graph())
+  print("tag")
   print(adv_x)
   assert(0)
   y = tf.placeholder(tf.float32, shape=(None, nb_classes))
@@ -162,6 +164,10 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
   adv_x = fgsm.generate(x, **fgsm_params)
   # Consider the attack to be constant
   adv_x = tf.stop_gradient(adv_x)
+  print(x)
+  print("tag")
+  print(adv_x)
+  assert(0)
   preds_adv = model(adv_x)
 
   # Evaluate the accuracy of the MNIST model on adversarial examples
