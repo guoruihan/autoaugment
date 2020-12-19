@@ -1,8 +1,13 @@
 import tensorflow as tf
-config = tf.ConfigProto()
+config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-session = tf.Session(config=config)
+session = tf.compat.v1.Session(config=config)
 
+import cleverhans
+
+from tensorflow.python.client import device_lib
+print(device_lib.list_local_devices())
+print(tf.test.is_built_with_cuda())
 from keras import models, layers, datasets, utils, backend, optimizers, initializers
 backend.set_session(session)
 from transformations import get_transformations
@@ -46,8 +51,8 @@ OP_MAGNITUDES = 10
 CHILD_BATCH_SIZE = 128
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
-CHILD_EPOCHS = 120
-CONTROLLER_EPOCHS = 500 # 15000 or 20000
+CHILD_EPOCHS = 12
+CONTROLLER_EPOCHS = 5 # 15000 or 20000
 
 class Operation:
     def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False):
@@ -164,6 +169,7 @@ class Controller:
                 op = [o[0, i, :] for o in op]
                 operations.append(Operation(*op))
             subpolicies.append(Subpolicy(*operations))
+        print(subpolicies)
         return softmaxes, subpolicies
 
 # generator
@@ -202,7 +208,7 @@ class Child:
     def fit(self, subpolicies, X, y):
         gen = autoaugment(subpolicies, X, y)
         self.model.fit_generator(
-            gen, CHILD_BATCHES, CHILD_EPOCHS, verbose=1, use_multiprocessing=False)
+            gen, CHILD_BATCHES, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
         return self
 
     def evaluate(self, X, y):
@@ -237,7 +243,7 @@ for epoch in range(CONTROLLER_EPOCHS):
 print()
 print('Best policies found:')
 print()
-_, subpolicies = controller.predict(25)
+_, subpolicies = controller.predict(SUBPOLICIES)
 for i, subpolicy in enumerate(subpolicies):
     print('# Subpolicy %d' % (i+1))
     print(subpolicy)
