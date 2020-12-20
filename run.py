@@ -3,14 +3,13 @@ config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 tf.Graph().as_default()
 session = tf.compat.v1.Session(graph=tf.get_default_graph(),config=config)
-print(tf.get_default_graph())
-print(session.graph)
+# print(tf.get_default_graph())
+# print(session.graph)
 import cleverhans
 
 from tensorflow.python.client import device_lib
-print(device_lib.list_local_devices())
-print(tf.test.is_built_with_cuda())
-
+# print(device_lib.list_local_devices())
+# print(tf.test.is_built_with_cuda())
 
 from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
 backend.set_session(session)
@@ -125,37 +124,50 @@ class Operation:
 
     def __call__(self, X):
         _X = []
+        x_use = None
+        id = []
         tag = 0
         for x in X:
-            tag = tag + 1
-            if(tag % 10 == 0):
-                print(tag)
             if np.random.rand() < self.prob:
                 #with session.graph.as_default():
                 x = PIL.Image.fromarray(x)
                 x = tf.image.resize_images(x, [32, 32])
                 x.set_shape([32, 32, 3])
                 x = tf.expand_dims(x,0)
-                x = tf.cast(x, tf.float32)
-                #print(x)
-                #assert(0)
-                # print(tf.get_default_graph())
-                # print(x.graph)
-                # print("what's the hell")
-                # print(session.graph)
-                #x = self.transformation(x, self.magnitude, self.model)
-
-                #tmp tag
-                #print(x)
-                fgsm = FastGradientMethod(self.model)
-                fgsm_params = {'eps': self.magnitude}
-                x = fgsm.generate(x, **fgsm_params)
-                #assert(0)
-            if(isinstance(x,tf.Tensor)):
+                id.append(tag)
+                if(x_use == None):
+                    x_use = x
+                else:
+                    x_use = tf.concat([x_use,x],0)
+            tag = tag + 1
+        id.append(-1)
+        x_use = tf.cast(x_use, tf.float32)
+        fgsm = FastGradientMethod(self.model)
+        fgsm_params = {'eps': self.magnitude}
+        x_use = fgsm.generate(x_use, **fgsm_params)
+            #assert(0)
+        tag = 0
+        npos = 0
+        for x in X:
+            nv = x
+            # print("x",x.shape)
+            if(id[npos] == tag):
                 with session.as_default():
-                    x = x.eval()
+                    nv=tf.slice(x_use,[npos,0,0,0],[1,-1,-1,-1])
+                    nv = tf.squeeze(nv)
+                    # print("x_use",x_use)
+                    # print("nv",nv)
+                npos = npos + 1
+            tag = tag + 1
+
+            if(isinstance(nv,tf.Tensor)):
+                with session.as_default():
+                    nv = nv.eval()
             with session.as_default():
-                _X.append(np.array(x))
+                _X.append(np.array(nv))
+        print("tag1")
+        print(_X)
+        print("tag2")
         return np.array(_X)
 
     def __str__(self):
@@ -291,13 +303,14 @@ class Child:
 
     def fit(self, subpolicies, X, y):
         subpolicy = np.random.choice(subpolicies)
-        print(subpolicy)
+        # print(subpolicy)
 #        assert(0)
         X = subpolicy(X)
+        # print(X)
         X = X.astype(np.float32) / 255  # select from middle and put some subpolicy on that
-        print("tag")
-        assert(0)
-        print("base:",tf.get_default_graph())
+        # print("tag")
+        # assert(0)
+        # print("base:",tf.get_default_graph())
         self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
         return self
 
