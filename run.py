@@ -127,9 +127,15 @@ class Operation:
         x_use = None
         id = []
         tag = 0
+        #print(X[0][0][0][0].type)
+        X = X.astype(np.uint8)
+        #print(X.shape)
+        #assert(0)
         for x in X:
             if np.random.rand() < self.prob:
                 #with session.graph.as_default():
+                # print("tagx")
+                # print(x)
                 x = PIL.Image.fromarray(x)
                 x = tf.image.resize_images(x, [32, 32])
                 x.set_shape([32, 32, 3])
@@ -148,26 +154,33 @@ class Operation:
             #assert(0)
         tag = 0
         npos = 0
+        result = [tf.squeeze(tmp) for tmp in tf.split(x_use,[1 for i in range(x_use.shape[0])],0)]
+        result = tuple(result)
+        # print("rua1")
+        # print(result)
+        with session.as_default():
+            result = session.run(result)
+        result = list(result)
+        # print("rua2")
+        # print(result)
         for x in X:
+            # print(tag)
             nv = x
             # print("x",x.shape)
             if(id[npos] == tag):
-                with session.as_default():
-                    nv=tf.slice(x_use,[npos,0,0,0],[1,-1,-1,-1])
-                    nv = tf.squeeze(nv)
-                    # print("x_use",x_use)
-                    # print("nv",nv)
+                #with session.as_default():
+                nv=result[npos]
+                #nv = tf.squeeze(nv)
+                # print("x_use",x_use)
+                # print("nv",nv)
                 npos = npos + 1
             tag = tag + 1
 
-            if(isinstance(nv,tf.Tensor)):
-                with session.as_default():
-                    nv = nv.eval()
-            with session.as_default():
-                _X.append(np.array(nv))
-        print("tag1")
-        print(_X)
-        print("tag2")
+            # with session.as_default():
+            _X.append(np.array(nv))
+        # print("tag1")
+        # print(_X)
+        # print("tag2")
         return np.array(_X)
 
     def __str__(self):
