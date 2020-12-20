@@ -290,7 +290,7 @@ class Child:
         X = X.astype(np.float32) / 255  # select from middle and put some subpolicy on that
 
         print("base:",tf.get_default_graph())
-        self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
+        self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=True)
         return self
 
     def evaluate(self, X, y):

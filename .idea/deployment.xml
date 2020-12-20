@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" serverName="gpu4" remoteFilesAllowedToDisappearOnAutoupload="false">
+    <serverData>
+      <paths name="gpu28">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/Job/DeepLearning/BigHomework/autoaugment" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="gpu4">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/Job/DeepLearning/BigHomework/autoaugment" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+  </component>
+</project>
