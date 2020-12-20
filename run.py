@@ -53,7 +53,7 @@ def get_dataset(dataset, reduced):
     else:
         raise Exception('Unknown dataset %s' % dataset)
     if reduced:
-        ix = np.random.choice(len(Xtr), 500, False)
+        ix = np.random.choice(len(Xtr), 4000, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
     ytr = utils.to_categorical(ytr)
@@ -69,7 +69,7 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 5
+OP_TYPES = 6
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
