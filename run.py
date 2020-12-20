@@ -135,7 +135,7 @@ class Operation:
                 x = PIL.Image.fromarray(x)
                 x = tf.image.resize_images(x, [32, 32])
                 x.set_shape([32, 32, 3])
-                x = tf.expand_dims(x,0)
+                # x = tf.expand_dims(x,0)
                 x = tf.cast(x, tf.float32)
                 #print(x)
                 #assert(0)
