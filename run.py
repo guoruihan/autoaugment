@@ -54,7 +54,7 @@ def get_dataset(dataset, reduced):
     else:
         raise Exception('Unknown dataset %s' % dataset)
     if reduced:
-        ix = np.random.choice(len(Xtr), 4000, False)
+        ix = np.random.choice(len(Xtr), 500, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
     ytr = utils.to_categorical(ytr)
@@ -125,7 +125,11 @@ class Operation:
 
     def __call__(self, X):
         _X = []
+        tag = 0
         for x in X:
+            tag = tag + 1
+            if(tag % 10 == 0):
+                print(tag)
             if np.random.rand() < self.prob:
                 #with session.graph.as_default():
                 x = PIL.Image.fromarray(x)
@@ -286,9 +290,13 @@ class Child:
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
+        subpolicy = np.random.choice(subpolicies)
+        print(subpolicy)
+#        assert(0)
         X = subpolicy(X)
         X = X.astype(np.float32) / 255  # select from middle and put some subpolicy on that
-
+        print("tag")
+        assert(0)
         print("base:",tf.get_default_graph())
         self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
         return self
