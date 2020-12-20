@@ -147,20 +147,22 @@ class Operation:
                     x_use = tf.concat([x_use,x],0)
             tag = tag + 1
         id.append(-1)
-        x_use = tf.cast(x_use, tf.float32)
-        fgsm = FastGradientMethod(self.model)
-        fgsm_params = {'eps': self.magnitude}
-        x_use = fgsm.generate(x_use, **fgsm_params)
+        if(x_use != None):
+            x_use = tf.cast(x_use, tf.float32)
+            fgsm = FastGradientMethod(self.model)
+            fgsm_params = {'eps': self.magnitude}
+            x_use = fgsm.generate(x_use, **fgsm_params)
             #assert(0)
+            result = [tf.squeeze(tmp) for tmp in tf.split(x_use, [1 for i in range(x_use.shape[0])], 0)]
+            result = tuple(result)
+            # print("rua1")
+            # print(result)
+            with session.as_default():
+                result = session.run(result)
+            result = list(result)
         tag = 0
         npos = 0
-        result = [tf.squeeze(tmp) for tmp in tf.split(x_use,[1 for i in range(x_use.shape[0])],0)]
-        result = tuple(result)
-        # print("rua1")
-        # print(result)
-        with session.as_default():
-            result = session.run(result)
-        result = list(result)
+
         # print("rua2")
         # print(result)
         for x in X:
