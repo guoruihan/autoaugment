@@ -77,7 +77,7 @@ CHILD_BATCH_SIZE = 128
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
 CHILD_EPOCHS = 12
-CONTROLLER_EPOCHS = 500 # 15000 or 20000
+CONTROLLER_EPOCHS = 5 # 15000 or 20000
 model_map = {
         'fgsm' : fgsm,
         'lbfgs' : lbfgs,
@@ -149,7 +149,6 @@ class Operation:
         id.append(-1)
         if(x_use != None):
             x_use = tf.cast(x_use, tf.float32)
-            fgsm = FastGradientMethod(self.model)
             fgsm_params = {'eps': self.magnitude}
             x_use = fgsm.generate(x_use, **fgsm_params)
             #assert(0)
@@ -326,7 +325,7 @@ class Child:
         # print("tag")
         # assert(0)
         # print("base:",tf.get_default_graph())
-        self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=False)
+        self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=True)
         return self
 
     def evaluate(self, X, y):
@@ -345,7 +344,8 @@ for epoch in range(CONTROLLER_EPOCHS):
     child = Child(Xtr.shape[1:])#(32,32,3)
 
     wrap = KerasModelWrapper(child.model)
-    # fgsm = FastGradientMethod(wrap, sess=session)
+
+    fgsm = FastGradientMethod(wrap, sess=session)
     # lbfgs = LBFGS(wrap, sess=session)
     # cwl2 = CarliniWagnerL2(wrap, sess=session)
     # df = DeepFool(wrap, sess=session)
