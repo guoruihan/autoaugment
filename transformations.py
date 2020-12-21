@@ -92,9 +92,9 @@ def get_transformations():
         # (LBFGS, 0, 1.0, 'lbfgs'),
         (FGSM, 0, 1.0, 'fgsm'),
         # (CWL2, 0, 1.0, 'cwl2'),
-        # (DF, 0, 1.0, 'df'),
         # (ENM, 0, 1.0, 'enm'),
         (MIM, 0, 1.0, 'mim'),
+        (DF, 0, 1.0, 'df'),
     ]
 
 if __name__ == '__main__':

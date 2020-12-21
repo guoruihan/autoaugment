@@ -69,7 +69,7 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 2
+OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
@@ -82,7 +82,7 @@ id_map = {
     0 : 'fgsm',
     # # 0 : 'lbfgs',
     # 1 : 'cwl2',
-    # 2 : 'df' ,
+    2 : 'df' ,
     # 3 : 'enm' ,
     1 : 'mim'
 }
@@ -90,7 +90,7 @@ model_map = {
         'fgsm' : fgsm,
         # 'lbfgs' : lbfgs,
         # 'cwl2' : cwl2,
-        # 'df' : df,
+        'df' : df,
         # 'enm' : enm,
         'mim' : mim
     }
@@ -365,7 +365,8 @@ for epoch in range(CONTROLLER_EPOCHS):
     fgsm = FastGradientMethod(wrap, sess=session)
     # lbfgs = LBFGS(wrap, sess=session)
     # cwl2 = CarliniWagnerL2(wrap, sess=session)
-    # df = DeepFool(wrap, sess=session)
+    df = DeepFool(wrap, sess=session)
+    df.generate
     # enm = ElasticNetMethod(wrap, sess=session)
     mim = MomentumIterativeMethod(wrap, sess=session)
 
@@ -373,7 +374,7 @@ for epoch in range(CONTROLLER_EPOCHS):
         'fgsm': fgsm,
         # 'lbfgs': lbfgs,
         # 'cwl2': cwl2,
-        # 'df': df,
+        'df': df,
         # 'enm': enm,
         'mim': mim
     }
