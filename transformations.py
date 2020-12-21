@@ -24,76 +24,76 @@ def SamplePairing(imgs):  # [0, 0.4]
     return f
 
 def FGSM(img, eps, model):
-    fgsm = FastGradientMethod(model)
-    print(tf.get_default_graph())
-    print(model.graph)
-    assert(0)
+    # fgsm = FastGradientMethod(model)
+    # print(tf.get_default_graph())
+    # print(model.graph)
+    # assert(0)
     # print(fgsm.sess.graph)
     # assert(0)
     fgsm_params = {'eps': eps}
-    return fgsm.generate(img, **fgsm_params)
+    return model.generate(img, **fgsm_params)
 
-
-def LBFGS(img, eps, model):
-    lbfgs = FastGradientMethod(model)
-    print(tf.get_default_graph())
-    print(model.graph)
-    assert(0)
-    # print(lbfgs.sess.graph)
-    # assert(0)
-    lbfgs_params = {}
-    return lbfgs.generate(img, **lbfgs_params)
+#
+# def LBFGS(img, eps, model):
+#     # lbfgs = FastGradientMethod(model)
+#     # print(tf.get_default_graph())
+#     # print(model.graph)
+#     # assert(0)
+#     # print(lbfgs.sess.graph)
+#     # assert(0)
+#     lbfgs_params = {}
+#     return model.generate(img, **lbfgs_params)
 
 def CWL2(img, eps, model):
-    cwl2 = FastGradientMethod(model)
-    print(tf.get_default_graph())
-    print(model.graph)
-    assert(0)
+    # cwl2 = FastGradientMethod(model)
+    # print(tf.get_default_graph())
+    # print(model.graph)
+    # assert(0)
     # print(cwl2.sess.graph)
     # assert(0)
     cwl2_params = {'confidence': eps} # 在所有参数中感觉是这个比较接近强度
-    return cwl2.generate(img, **cwl2_params)
+    return model.generate(img, **cwl2_params)
 
 def DF(img, eps, model):
-    df = FastGradientMethod(model)
-    print(tf.get_default_graph())
-    print(model.graph)
-    assert(0)
+    # df = FastGradientMethod(model)
+    # print(tf.get_default_graph())
+    # print(model.graph)
+    # assert(0)
     # print(df.sess.graph)
     # assert(0)
     df_params = {'clip_min':0., 'clip_max':eps} #感觉没有找到强度就用eps界定上下界了
-    return df.generate(img, **df_params)
+    return model.generate(img, **df_params)
 
 def ENM(img, eps, model):
-    enm = FastGradientMethod(model)
-    print(tf.get_default_graph())
-    print(model.graph)
-    assert(0)
+    # enm = FastGradientMethod(model)
+    # print(tf.get_default_graph())
+    # print(model.graph)
+    # assert(0)
     # print(enm.sess.graph)
     # assert(0)
     enm_params = {'confidence' : eps}
-    return enm.generate(img, **enm_params)
+    return model.generate(img, **enm_params)
 
 def MIM(img, eps, model):
-    mim = FastGradientMethod(model)
-    print(tf.get_default_graph())
-    print(model.graph)
-    assert(0)
+    # mim = FastGradientMethod(model)
+    # print(tf.get_default_graph())
+    # print(model.graph)
+    # assert(0)
     # print(mim.sess.graph)
     # assert(0)
     mim_params = {'eps': eps}
-    return mim.generate(img, **mim_params)
+    return model.generate(img, **mim_params)
 
 
 
 
 def get_transformations():
     return [
+        # (LBFGS, 0, 1.0, 'lbfgs'),
         (FGSM, 0, 1.0, 'fgsm'),
-        (LBFGS, 0, 1.0, 'lbfgs'),
-        (CWL2, 0, 1.0, 'cwl2'),
-        (DF, 0, 1.0, 'df'),
-        (ENM, 0, 1.0, 'enm'),
+        # (CWL2, 0, 1.0, 'cwl2'),
+        # (DF, 0, 1.0, 'df'),
+        # (ENM, 0, 1.0, 'enm'),
         (MIM, 0, 1.0, 'mim'),
     ]
 

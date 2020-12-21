@@ -53,7 +53,7 @@ def get_dataset(dataset, reduced):
     else:
         raise Exception('Unknown dataset %s' % dataset)
     if reduced:
-        ix = np.random.choice(len(Xtr), 4000, False)
+        ix = np.random.choice(len(Xtr), 500, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
     ytr = utils.to_categorical(ytr)
@@ -69,7 +69,7 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 6
+OP_TYPES = 2
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
@@ -78,12 +78,20 @@ CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//'
 
 CHILD_EPOCHS = 12
 CONTROLLER_EPOCHS = 5 # 15000 or 20000
+id_map = {
+    0 : 'fgsm',
+    # # 0 : 'lbfgs',
+    # 1 : 'cwl2',
+    # 2 : 'df' ,
+    # 3 : 'enm' ,
+    1 : 'mim'
+}
 model_map = {
         'fgsm' : fgsm,
-        'lbfgs' : lbfgs,
-        'cwl2' : cwl2,
-        'df' : df,
-        'enm' : enm,
+        # 'lbfgs' : lbfgs,
+        # 'cwl2' : cwl2,
+        # 'df' : df,
+        # 'enm' : enm,
         'mim' : mim
     }
 
@@ -123,6 +131,12 @@ class Operation:
         self.transformation = t[0]
 
     def __call__(self, X):
+        name = id_map[self.type]
+        print("now,",name)
+        # print(self.type)
+        # print(name)
+        # print(model_map[name])
+        # assert(0)
         _X = []
         x_use = None
         id = []
@@ -149,19 +163,22 @@ class Operation:
         id.append(-1)
         if(x_use != None):
             x_use = tf.cast(x_use, tf.float32)
-            fgsm_params = {'eps': self.magnitude}
-            x_use = fgsm.generate(x_use, **fgsm_params)
-            #assert(0)
+            # fgsm_params = {'eps': self.magnitude}
+            x_use = self.transformation(x_use,self.magnitude,model_map[name])
+            # x_use = fgsm.generate(x_use, **fgsm_params)
+            #assert(0);
             result = [tf.squeeze(tmp) for tmp in tf.split(x_use, [1 for i in range(x_use.shape[0])], 0)]
-            result = tuple(result)
+            # result = tuple(result)
             # print("rua1")
-            # print(result)
+            # print(name)
+            # print(x_use)
+            # print(len(result))
+            # assert(0)
             with session.as_default():
                 result = session.run(result)
             result = list(result)
         tag = 0
         npos = 0
-
         # print("rua2")
         # print(result)
         for x in X:
@@ -182,6 +199,7 @@ class Operation:
         # print("tag1")
         # print(_X)
         # print("tag2")
+        print("finish,",name)
         return np.array(_X)
 
     def __str__(self):
@@ -344,20 +362,19 @@ for epoch in range(CONTROLLER_EPOCHS):
     child = Child(Xtr.shape[1:])#(32,32,3)
 
     wrap = KerasModelWrapper(child.model)
-
     fgsm = FastGradientMethod(wrap, sess=session)
     # lbfgs = LBFGS(wrap, sess=session)
     # cwl2 = CarliniWagnerL2(wrap, sess=session)
     # df = DeepFool(wrap, sess=session)
     # enm = ElasticNetMethod(wrap, sess=session)
-    # mim = MomentumIterativeMethod(wrap, sess=session)
+    mim = MomentumIterativeMethod(wrap, sess=session)
 
     model_map = {
         'fgsm': fgsm,
-        'lbfgs': lbfgs,
-        'cwl2': cwl2,
-        'df': df,
-        'enm': enm,
+        # 'lbfgs': lbfgs,
+        # 'cwl2': cwl2,
+        # 'df': df,
+        # 'enm': enm,
         'mim': mim
     }
 
