@@ -78,6 +78,14 @@ CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//'
 
 CHILD_EPOCHS = 12
 CONTROLLER_EPOCHS = 5 # 15000 or 20000
+id_map = {
+    0 : 'fgsm',
+    1 : 'lbfgs',
+    2 : 'cwl2',
+    3 : 'df' ,
+    4 : 'enm' ,
+    5 : 'mim'
+}
 model_map = {
         'fgsm' : fgsm,
         'lbfgs' : lbfgs,
@@ -123,6 +131,11 @@ class Operation:
         self.transformation = t[0]
 
     def __call__(self, X):
+        name = id_map[self.type]
+        # print(self.type)
+        # print(name)
+        # print(model_map[name])
+        # assert(0)
         _X = []
         x_use = None
         id = []
@@ -149,9 +162,9 @@ class Operation:
         id.append(-1)
         if(x_use != None):
             x_use = tf.cast(x_use, tf.float32)
-            fgsm = FastGradientMethod(self.model)
-            fgsm_params = {'eps': self.magnitude}
-            x_use = fgsm.generate(x_use, **fgsm_params)
+            # fgsm_params = {'eps': self.magnitude}
+            x_use = self.transformation(x_use,self.magnitude,model_map[name])
+            # x_use = fgsm.generate(x_use, **fgsm_params)
             #assert(0)
             result = [tf.squeeze(tmp) for tmp in tf.split(x_use, [1 for i in range(x_use.shape[0])], 0)]
             result = tuple(result)
@@ -345,12 +358,12 @@ for epoch in range(CONTROLLER_EPOCHS):
     child = Child(Xtr.shape[1:])#(32,32,3)
 
     wrap = KerasModelWrapper(child.model)
-    # fgsm = FastGradientMethod(wrap, sess=session)
-    # lbfgs = LBFGS(wrap, sess=session)
-    # cwl2 = CarliniWagnerL2(wrap, sess=session)
-    # df = DeepFool(wrap, sess=session)
-    # enm = ElasticNetMethod(wrap, sess=session)
-    # mim = MomentumIterativeMethod(wrap, sess=session)
+    fgsm = FastGradientMethod(wrap, sess=session)
+    lbfgs = LBFGS(wrap, sess=session)
+    cwl2 = CarliniWagnerL2(wrap, sess=session)
+    df = DeepFool(wrap, sess=session)
+    enm = ElasticNetMethod(wrap, sess=session)
+    mim = MomentumIterativeMethod(wrap, sess=session)
 
     model_map = {
         'fgsm': fgsm,
