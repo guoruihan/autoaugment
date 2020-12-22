@@ -1,6 +1,8 @@
 import PIL, PIL.ImageOps, PIL.ImageEnhance, PIL.ImageDraw
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt # plt 用于显示图片
+from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
 import tensorflow as tf
 
 from cleverhans.attacks import FastGradientMethod
@@ -96,17 +98,34 @@ def get_transformations():
         (DF, 0, 1.0, 'df'),
     ]
 
+
+def get_dataset(dataset, reduced):
+    if dataset == 'cifar10':
+        (Xtr, ytr), (Xts, yts) = datasets.cifar10.load_data()
+    elif dataset == 'cifar100':
+        (Xtr, ytr), (Xts, yts) = datasets.cifar100.load_data()
+    else:
+        raise Exception('Unknown dataset %s' % dataset)
+    if reduced:
+        ix = np.random.choice(len(Xtr), 2048 * 8, False)
+        Xtr = Xtr[ix]
+        ytr = ytr[ix]
+    ytr = utils.to_categorical(ytr)
+    yts = utils.to_categorical(yts)
+    return (Xtr, ytr), (Xts, yts)
+
+(Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
+
+def attack(img):
+    
+
 if __name__ == '__main__':
-    tr = loadmat('../data/streetview/train_32x32.mat')
-    imgs = np.moveaxis(tr['X'], -1, 0)
-    transfs = get_transformations(imgs)
-    for i in range(10):
-        img2 = img = PIL.Image.fromarray(imgs[i])
-        for t, min, max in transfs:
-            v = np.random.rand()*(max-min) + min
-            img2 = t(img2, v)
-        plt.subplot(1, 2, 1)
-        plt.imshow(img)
-        plt.subplot(1, 2, 2)
-        plt.imshow(img2)
-        plt.show()
+    print(Xtr[0].shape)
+    plt.imshow(Xtr[0])  # 显示图片
+    plt.axis('off')  # 不显示坐标轴
+    plt.show()
+    tr = Xtr[0]
+
+    plt.imshow(attack(tr))
+    plt.axis('off')
+    plt.show()
