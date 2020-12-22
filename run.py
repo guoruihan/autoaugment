@@ -53,7 +53,7 @@ def get_dataset(dataset, reduced):
     else:
         raise Exception('Unknown dataset %s' % dataset)
     if reduced:
-        ix = np.random.choice(len(Xtr), 500, False)
+        ix = np.random.choice(len(Xtr), 4000, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
     ytr = utils.to_categorical(ytr)
@@ -69,7 +69,7 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 2
+OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
@@ -77,20 +77,20 @@ CHILD_BATCH_SIZE = 128
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
 CHILD_EPOCHS = 12
-CONTROLLER_EPOCHS = 5 # 15000 or 20000
+CONTROLLER_EPOCHS = 500 # 15000 or 20000
 id_map = {
     0 : 'fgsm',
-    # # 0 : 'lbfgs',
+    # 1 : 'lbfgs',
     # 1 : 'cwl2',
-    # 2 : 'df' ,
-    # 3 : 'enm' ,
+    2 : 'df' ,
+    # # 3 : 'enm' ,
     1 : 'mim'
 }
 model_map = {
         'fgsm' : fgsm,
-        # 'lbfgs' : lbfgs,
+        'lbfgs' : lbfgs,
         # 'cwl2' : cwl2,
-        # 'df' : df,
+        'df' : df,
         # 'enm' : enm,
         'mim' : mim
     }
@@ -355,7 +355,7 @@ mem_accuracies = []
 
 controller = Controller()
 
-
+ma = 0
 
 for epoch in range(CONTROLLER_EPOCHS):
 
@@ -363,17 +363,17 @@ for epoch in range(CONTROLLER_EPOCHS):
 
     wrap = KerasModelWrapper(child.model)
     fgsm = FastGradientMethod(wrap, sess=session)
-    # lbfgs = LBFGS(wrap, sess=session)
+    lbfgs = LBFGS(wrap, sess=session)
     # cwl2 = CarliniWagnerL2(wrap, sess=session)
-    # df = DeepFool(wrap, sess=session)
+    df = DeepFool(wrap, sess=session)
     # enm = ElasticNetMethod(wrap, sess=session)
     mim = MomentumIterativeMethod(wrap, sess=session)
 
     model_map = {
         'fgsm': fgsm,
-        # 'lbfgs': lbfgs,
+        'lbfgs': lbfgs,
         # 'cwl2': cwl2,
-        # 'df': df,
+        'df': df,
         # 'enm': enm,
         'mim': mim
     }
@@ -391,6 +391,17 @@ for epoch in range(CONTROLLER_EPOCHS):
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
     accuracy = child.evaluate(Xts, yts)
+
+    if(accuracy > ma):
+        ma = accuracy
+        f = open("subpolicy_result", "w")
+        print(ma, file = f)
+        for i, subpolicy in enumerate(subpolicies):
+            print('# Sub-policy %d' % (i + 1), file = f)
+            print(subpolicy, file = f)
+        f.close()
+
+
     print('-> Child accuracy: %.3f (elaspsed time: %ds)' % (accuracy, (toc-tic)))
     mem_accuracies.append(accuracy)# accuracy which was put into use
 
