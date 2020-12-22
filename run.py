@@ -1,9 +1,17 @@
 import tensorflow as tf
-config = tf.ConfigProto()
+config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-session = tf.Session(config=config)
+tf.Graph().as_default()
+session = tf.compat.v1.Session(graph=tf.get_default_graph(),config=config)
+# print(tf.get_default_graph())
+# print(session.graph)
+import cleverhans
 
-from keras import models, layers, datasets, utils, backend, optimizers, initializers
+from tensorflow.python.client import device_lib
+# print(device_lib.list_local_devices())
+# print(tf.test.is_built_with_cuda())
+
+from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
 backend.set_session(session)
 from transformations import get_transformations
 import PIL.Image
@@ -11,6 +19,29 @@ import numpy as np
 import time
 from keras_tqdm import TQDMCallback
 from tqdm import tqdm
+
+fgsm = None
+lbfgs = None
+cwl2 = None
+df = None
+enm = None
+mim = None
+
+
+from cleverhans.attacks import FastGradientMethod
+from cleverhans.attacks import LBFGS
+from cleverhans.attacks import MomentumIterativeMethod
+from cleverhans.attacks import CarliniWagnerL2
+from cleverhans.attacks import DeepFool
+from cleverhans.attacks import ElasticNetMethod
+from cleverhans.compat import flags
+from cleverhans.dataset import MNIST
+from cleverhans.loss import CrossEntropy
+from cleverhans.train import train
+from cleverhans.utils import AccuracyReport
+from cleverhans.utils_keras import cnn_model
+from cleverhans.utils_keras import KerasModelWrapper
+from cleverhans.utils_tf import model_eval
 
 # datasets in the AutoAugment paper:
 # CIFAR-10, CIFAR-100, SVHN, and ImageNet
@@ -31,11 +62,8 @@ def get_dataset(dataset, reduced):
     yts = utils.to_categorical(yts)
     return (Xtr, ytr), (Xts, yts)
 
-(Xtr, ytr), (Xts, yts) = get_dataset('cifar10', False)
-#print(len(Xtr))
-#quit()
-transformations = get_transformations(Xtr)
-
+(Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
+transformations = get_transformations()
 # Experiment parameters
 
 LSTM_UNITS = 100
@@ -43,15 +71,31 @@ LSTM_UNITS = 100
 SUBPOLICIES = 5
 SUBPOLICY_OPS = 2
 
-OP_TYPES = 16
+OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
 CHILD_BATCH_SIZE = 4096
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
-CHILD_EPOCHS = 50
-CONTROLLER_EPOCHS = 500 # 15000 or 20000
+CHILD_EPOCHS = 12
+CONTROLLER_EPOCHS = 5 # 15000 or 20000
+id_map = {
+    0 : 'fgsm',
+    # # 0 : 'lbfgs',
+    # 1 : 'cwl2',
+    2 : 'df' ,
+    # 3 : 'enm' ,
+    1 : 'mim'
+}
+model_map = {
+        'fgsm' : fgsm,
+        # 'lbfgs' : lbfgs,
+        # 'cwl2' : cwl2,
+        'df' : df,
+        # 'enm' : enm,
+        'mim' : mim
+    }
 
 class Operation:
     def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False):
@@ -69,15 +113,95 @@ class Operation:
             t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
+
+            # if(t[3] == 'fgsm'):
+            #     self.model = fgsm
+            # elif(t[3] == 'lbfgs'):
+            #     self.model = lbfgs
+            # elif(t[3] == 'cwl2'):
+            #     self.model = cwl2
+            # elif(t[3] == 'df'):
+            #     self.model = df
+            # elif(t[3] == 'enm'):
+            #     self.model = enm
+            # elif(t[3] == 'mim'):
+            #     self.model = mim
+            # else:
+            #     assert(0)
+            self.model = wrap
+            #self.model = model_map.get(t[3])
         self.transformation = t[0]
 
     def __call__(self, X):
+        name = id_map[self.type]
+        print("now,",name)
+        # print(self.type)
+        # print(name)
+        # print(model_map[name])
+        # assert(0)
         _X = []
+        x_use = None
+        id = []
+        tag = 0
+        #print(X[0][0][0][0].type)
+        X = X.astype(np.uint8)
+        #print(X.shape)
+        #assert(0)
         for x in X:
             if np.random.rand() < self.prob:
+                #with session.graph.as_default():
+                # print("tagx")
+                # print(x)
                 x = PIL.Image.fromarray(x)
-                x = self.transformation(x, self.magnitude)
-            _X.append(np.array(x))
+                x = tf.image.resize_images(x, [32, 32])
+                x.set_shape([32, 32, 3])
+                x = tf.expand_dims(x,0)
+                id.append(tag)
+                if(x_use == None):
+                    x_use = x
+                else:
+                    x_use = tf.concat([x_use,x],0)
+            tag = tag + 1
+        id.append(-1)
+        if(x_use != None):
+            x_use = tf.cast(x_use, tf.float32)
+            # fgsm_params = {'eps': self.magnitude}
+            x_use = self.transformation(x_use,self.magnitude,model_map[name])
+            # x_use = fgsm.generate(x_use, **fgsm_params)
+            #assert(0);
+            result = [tf.squeeze(tmp) for tmp in tf.split(x_use, [1 for i in range(x_use.shape[0])], 0)]
+            # result = tuple(result)
+            # print("rua1")
+            # print(name)
+            # print(x_use)
+            # print(len(result))
+            # assert(0)
+            with session.as_default():
+                result = session.run(result)
+            result = list(result)
+        tag = 0
+        npos = 0
+        # print("rua2")
+        # print(result)
+        for x in X:
+            # print(tag)
+            nv = x
+            # print("x",x.shape)
+            if(id[npos] == tag):
+                #with session.as_default():
+                nv=result[npos]
+                #nv = tf.squeeze(nv)
+                # print("x_use",x_use)
+                # print("nv",nv)
+                npos = npos + 1
+            tag = tag + 1
+
+            # with session.as_default():
+            _X.append(np.array(nv))
+        # print("tag1")
+        # print(_X)
+        # print("tag2")
+        print("finish,",name)
         return np.array(_X)
 
     def __str__(self):
@@ -139,7 +263,7 @@ class Controller:
         return models.Model(input_layer, outputs)
 
     def fit(self, mem_softmaxes, mem_accuracies):
-        session = backend.get_session() #我们在session里面计算tensor
+        #session = backend.get_session() #我们在session里面计算tensor
         min_acc = np.min(mem_accuracies)
         max_acc = np.max(mem_accuracies)
         dummy_input = np.zeros((1, SUBPOLICIES, 1))
@@ -159,15 +283,23 @@ class Controller:
         dummy_input = np.zeros((1, size, 1), np.float32)
         #没用的输入
         softmaxes = self.model.predict(dummy_input)
+        # print("softmaxes")
+        # print(softmaxes)
+        # print("shape")
+        # print(len(softmaxes))
         # convert softmaxes into subpolicies
         subpolicies = []
         for i in range(SUBPOLICIES):
             operations = []
             for j in range(SUBPOLICY_OPS):
                 op = softmaxes[j*3:(j+1)*3]
+                #print("op")
+                #print(op)
                 op = [o[0, i, :] for o in op]
+                #print(op)
                 operations.append(Operation(*op))
             subpolicies.append(Subpolicy(*operations))
+        #print(subpolicies)
         return softmaxes, subpolicies
 
 # generator
@@ -210,6 +342,7 @@ class Child:
     def evaluate(self, X, y):
         return self.model.evaluate(X, y, verbose=0)[1]
 
+
 mem_softmaxes = []
 mem_accuracies = []
 
@@ -219,12 +352,35 @@ controller_iter = tqdm(range(CONTROLLER_EPOCHS), position=0)
 for epoch in controller_iter:
     #print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
 
+    child = Child(Xtr.shape[1:])#(32,32,3)
+
+    wrap = KerasModelWrapper(child.model)
+    fgsm = FastGradientMethod(wrap, sess=session)
+    # lbfgs = LBFGS(wrap, sess=session)
+    # cwl2 = CarliniWagnerL2(wrap, sess=session)
+    df = DeepFool(wrap, sess=session)
+    df.generate
+    # enm = ElasticNetMethod(wrap, sess=session)
+    mim = MomentumIterativeMethod(wrap, sess=session)
+
+    model_map = {
+        'fgsm': fgsm,
+        # 'lbfgs': lbfgs,
+        # 'cwl2': cwl2,
+        'df': df,
+        # 'enm': enm,
+        'mim': mim
+    }
+
+    print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
     softmaxes, subpolicies = controller.predict(SUBPOLICIES)
     #for i, subpolicy in enumerate(subpolicies):
     #    print('# Sub-policy %d' % (i+1))
     #    print(subpolicy)
     mem_softmaxes.append(softmaxes)
-    child = Child(Xtr.shape[1:])#(32,32,3)
+
+
+
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
@@ -243,7 +399,7 @@ print()
 print()
 print('Best policies found:')
 print()
-_, subpolicies = controller.predict(25)
+_, subpolicies = controller.predict(SUBPOLICIES)
 for i, subpolicy in enumerate(subpolicies):
     print('# Subpolicy %d' % (i+1))
     print(subpolicy)
