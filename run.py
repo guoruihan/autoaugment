@@ -9,6 +9,8 @@ from transformations import get_transformations
 import PIL.Image
 import numpy as np
 import time
+from keras_tqdm import TQDMCallback
+from tqdm import tqdm
 
 # datasets in the AutoAugment paper:
 # CIFAR-10, CIFAR-100, SVHN, and ImageNet
@@ -22,14 +24,16 @@ def get_dataset(dataset, reduced):
     else:
         raise Exception('Unknown dataset %s' % dataset)
     if reduced:
-        ix = np.random.choice(len(Xtr), 4000, False)
+        ix = np.random.choice(len(Xtr), 2048 * 8, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
     ytr = utils.to_categorical(ytr)
     yts = utils.to_categorical(yts)
     return (Xtr, ytr), (Xts, yts)
 
-(Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
+(Xtr, ytr), (Xts, yts) = get_dataset('cifar10', False)
+#print(len(Xtr))
+#quit()
 transformations = get_transformations(Xtr)
 
 # Experiment parameters
@@ -43,10 +47,10 @@ OP_TYPES = 16
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
-CHILD_BATCH_SIZE = 128
+CHILD_BATCH_SIZE = 4096
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
-CHILD_EPOCHS = 120
+CHILD_EPOCHS = 50
 CONTROLLER_EPOCHS = 500 # 15000 or 20000
 
 class Operation:
@@ -184,7 +188,7 @@ class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
     def __init__(self, input_shape):
         self.model = self.create_model(input_shape)
-        optimizer = optimizers.SGD(decay=1e-4)
+        optimizer = optimizers.SGD(decay=1e-3)
         self.model.compile(optimizer, 'categorical_crossentropy', ['accuracy'])
 
     def create_model(self, input_shape):
@@ -192,17 +196,15 @@ class Child:
         x = layers.Conv2D(32, 3, activation='relu')(x)# take in a tensor and give out another tensor
         x = layers.Conv2D(64, 3, activation='relu')(x)
         x = layers.MaxPooling2D(2)(x)
-        x = layers.Dropout(0.25)(x)
+        x = layers.Dropout(0.1)(x)
         x = layers.Flatten()(x)
         x = layers.Dense(128, activation='relu')(x)
-        x = layers.Dropout(0.5)(x)
+        x = layers.Dropout(0.2)(x)
         x = layers.Dense(10, activation='softmax')(x)
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
-        gen = autoaugment(subpolicies, X, y)
-        self.model.fit_generator(
-            gen, CHILD_BATCHES, CHILD_EPOCHS, verbose=1, use_multiprocessing=False)
+        self.model.fit_generator(autoaugment(subpolicies, X, y), CHILD_BATCHES, CHILD_EPOCHS, verbose=0, callbacks=[TQDMCallback(leave_inner=False, leave_outer=False)])
         return self
 
     def evaluate(self, X, y):
@@ -213,27 +215,31 @@ mem_accuracies = []
 
 controller = Controller()
 
-for epoch in range(CONTROLLER_EPOCHS):
-    print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
+controller_iter = tqdm(range(CONTROLLER_EPOCHS), position=0)
+for epoch in controller_iter:
+    #print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
 
     softmaxes, subpolicies = controller.predict(SUBPOLICIES)
-    for i, subpolicy in enumerate(subpolicies):
-        print('# Sub-policy %d' % (i+1))
-        print(subpolicy)
+    #for i, subpolicy in enumerate(subpolicies):
+    #    print('# Sub-policy %d' % (i+1))
+    #    print(subpolicy)
     mem_softmaxes.append(softmaxes)
     child = Child(Xtr.shape[1:])#(32,32,3)
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
     accuracy = child.evaluate(Xts, yts)
-    print('-> Child accuracy: %.3f (elaspsed time: %ds)' % (accuracy, (toc-tic)))
+    controller_iter.set_description(f'Controller - acc: {accuracy:.3f}')
+    #print('-> Child accuracy: %.3f (elaspsed time: %ds)' % (accuracy, (toc-tic)))
     mem_accuracies.append(accuracy)# accuracy which was put into use
 
     if len(mem_softmaxes) > 5:
         # ricardo: I let some epochs pass, so that the normalization is more robust
         controller.fit(mem_softmaxes, mem_accuracies)
-    print()
+    #print()
 
+print()
+print()
 print()
 print('Best policies found:')
 print()
