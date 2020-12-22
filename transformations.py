@@ -117,7 +117,7 @@ def get_dataset(dataset, reduced):
 (Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
 
 def attack(img):
-    
+    pass
 
 if __name__ == '__main__':
     print(Xtr[0].shape)
