@@ -4,7 +4,6 @@ import numpy as np
 import tensorflow as tf
 
 from cleverhans.attacks import FastGradientMethod
-from cleverhans.compat import flags
 from cleverhans.dataset import MNIST
 from cleverhans.loss import CrossEntropy
 from cleverhans.train import train

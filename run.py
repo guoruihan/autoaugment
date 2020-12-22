@@ -34,7 +34,6 @@ from cleverhans.attacks import MomentumIterativeMethod
 from cleverhans.attacks import CarliniWagnerL2
 from cleverhans.attacks import DeepFool
 from cleverhans.attacks import ElasticNetMethod
-from cleverhans.compat import flags
 from cleverhans.dataset import MNIST
 from cleverhans.loss import CrossEntropy
 from cleverhans.train import train
@@ -336,7 +335,15 @@ class Child:
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
-        self.model.fit_generator(autoaugment(subpolicies, X, y), CHILD_BATCHES, CHILD_EPOCHS, verbose=0, callbacks=[TQDMCallback(leave_inner=False, leave_outer=False)])
+        which = np.random.randint(len(subpolicies), size=len(X))
+        for i, subpolicy in enumerate(subpolicies):
+            X[which == i] = subpolicy(X[which == i])
+        X = X.astype(np.float32) / 255
+        callback = TQDMCallback(leave_inner=False, leave_outer=False)
+        callback.on_train_batch_begin = callback.on_batch_begin
+        callback.on_train_batch_end = callback.on_batch_end
+        self.model.fit(X, y, CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, callbacks=[callback])
+        # self.model.fit_generator(autoaugment(subpolicies, X, y), CHILD_BATCHES, CHILD_EPOCHS, verbose=0, callbacks=[TQDMCallback(leave_inner=False, leave_outer=False)])
         return self
 
     def evaluate(self, X, y):
