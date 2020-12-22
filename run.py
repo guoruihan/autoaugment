@@ -78,11 +78,7 @@ OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
-<<<<<<< HEAD
-CHILD_BATCH_SIZE = 128
-=======
 CHILD_BATCH_SIZE = 64
->>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
 CHILD_EPOCHS = 120
@@ -252,18 +248,6 @@ class Child:
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
-<<<<<<< HEAD
-        subpolicy = np.random.choice(subpolicies)
-        # print(subpolicy)
-#        assert(0)
-        X = subpolicy(X)
-        # print(X)
-        X = X.astype(np.float32)
-        # print("tag")
-        # assert(0)
-        # print("base:",tf.get_default_graph())
-        self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=True)
-=======
         which = np.random.randint(len(subpolicies), size=len(X))
         for i, subpolicy in enumerate(subpolicies):
             X[which == i] = subpolicy(X[which == i])
@@ -271,7 +255,6 @@ class Child:
         callback.on_train_batch_begin = callback.on_batch_begin
         callback.on_train_batch_end = callback.on_batch_end
         self.model.fit(X, y, CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, callbacks=[callback])
->>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
         return self
 
     def evaluate(self, X, y):
@@ -283,17 +266,9 @@ mem_accuracies = []
 
 controller = Controller()
 
-<<<<<<< HEAD
-ma = 0
-
-for epoch in range(CONTROLLER_EPOCHS):
-
-    child = Child(Xtr.shape[1:])#(32,32,3)
-=======
 controller_iter = tqdm(range(CONTROLLER_EPOCHS), position=0)
 for epoch in controller_iter:
     child = Child(Xtr.shape[1:])
->>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
 
     wrap = KerasModelWrapper(child.model)
     fgsm = FastGradientMethod(wrap, sess=session)
@@ -340,10 +315,7 @@ for epoch in controller_iter:
     if len(mem_softmaxes) > 5:
         # ricardo: I let some epochs pass, so that the normalization is more robust
         controller.fit(mem_softmaxes, mem_accuracies)
-<<<<<<< HEAD
-    print()
-=======
->>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
+
 
 print()
 print('Best policies found:')
