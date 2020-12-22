@@ -13,7 +13,7 @@ from tensorflow.python.client import device_lib
 
 from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
 backend.set_session(session)
-from transformations import get_transformations
+import transformations
 import PIL.Image
 import numpy as np
 import time
@@ -65,13 +65,12 @@ def get_dataset(dataset, reduced):
     return (Xtr, ytr), (Xts, yts)
 
 (Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
-transformations = get_transformations()
 # Experiment parameters
 
 LSTM_UNITS = 100
 
-SUBPOLICIES = 3
-SUBPOLICY_OPS = 2
+SUBPOLICIES = 1
+SUBPOLICY_OPS = 1
 
 OP_TYPES = 3
 OP_PROBS = 11
@@ -89,9 +88,14 @@ id_map = {
     # # 3 : 'enm' ,
     1 : 'mim'
 }
+wrapper_map = {
+    'fgsm': transformations.FGSM,
+    'df': transformations.DF,
+    'mim': transformations.MIM,
+}
 model_map = {
     'fgsm' : fgsm,
-    'lbfgs' : lbfgs,
+    # 'lbfgs' : lbfgs,
     # 'cwl2' : cwl2,
     'df' : df,
     # 'enm' : enm,
@@ -107,26 +111,22 @@ class Operation:
     def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False):
         if argmax:
             self.type = types_softmax.argmax()
-            t = transformations[self.type]
             self.prob = probs_softmax.argmax() / (OP_PROBS-1)
-            m = magnitudes_softmax.argmax() / (OP_MAGNITUDES-1)
-            self.magnitude = m*(t[2]-t[1]) + t[1]
+            self.magnitude = magnitudes_softmax.argmax() / (OP_MAGNITUDES-1)
         else:
             self.type = np.random.choice(OP_TYPES, p=types_softmax)
-            t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
-            self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
-            self.model = wrap
-        self.transformation = t[0]
+            self.magnitude = np.random.choice(np.linspace(0, 1, OP_MAGNITUDES), p=magnitudes_softmax)
+        self.type = id_map[self.type]
+        self.transformation = wrapper_map[self.type]
 
     def __call__(self, X):
-        name = id_map[self.type]
-        mi, ma = range_map[name]
+        mi, ma = range_map[self.type]
         idx = np.random.uniform(size=len(X))
         idx = np.where(idx < self.prob)[0]
         for i in tqdm(range(0, len(idx), CHILD_BATCH_SIZE), desc='operation batch: ', file=sys.stdout, position=3, leave=False):
             tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
-            tensor = self.transformation(tensor, self.magnitude * (ma - mi) + mi, model_map[name])
+            tensor = self.transformation(tensor, self.magnitude * (ma - mi) + mi, model_map[self.type])
             X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
         return X
 
@@ -255,6 +255,14 @@ for epoch in controller_iter:
     # enm = ElasticNetMethod(wrap, sess=session)
     mim = MomentumIterativeMethod(wrap, sess=session)
 
+    model_map = {
+        'fgsm' : fgsm,
+        # 'lbfgs' : lbfgs,
+        # 'cwl2' : cwl2,
+        'df' : df,
+        # 'enm' : enm,
+        'mim' : mim
+    }
 
     softmaxes, subpolicies = controller.predict(SUBPOLICIES)
     mem_softmaxes.append(softmaxes)

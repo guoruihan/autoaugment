@@ -88,15 +88,15 @@ def MIM(img, eps, model):
 
 
 
-def get_transformations():
-    return [
-        (FGSM, 0, 1.0, 'fgsm'),
-        (LBFGS, 0, 1.0, 'lbfgs'),
-        (CWL2, 0, 1.0, 'cwl2'),
-        (DF, 0, 1.0, 'df'),
-        (ENM, 0, 1.0, 'enm'),
-        (MIM, 0, 1.0, 'mim'),
-    ]
+# def get_transformations():
+    # return [FGSM, MIM, DF
+        # (FGSM, 0, 1.0, 'fgsm'),
+        # (LBFGS, 0, 1.0, 'lbfgs'),
+        # (CWL2, 0, 1.0, 'cwl2'),
+        # (DF, 0, 1.0, 'df'),
+        # (ENM, 0, 1.0, 'enm'),
+        # (MIM, 0, 1.0, 'mim'),
+    # ]
 
 
 def get_dataset(dataset, reduced):
