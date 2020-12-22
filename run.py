@@ -1,3 +1,7 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+
 import tensorflow as tf
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -32,7 +36,6 @@ from cleverhans.attacks import MomentumIterativeMethod
 from cleverhans.attacks import CarliniWagnerL2
 from cleverhans.attacks import DeepFool
 from cleverhans.attacks import ElasticNetMethod
-from cleverhans.compat import flags
 from cleverhans.dataset import MNIST
 from cleverhans.loss import CrossEntropy
 from cleverhans.train import train
@@ -56,6 +59,8 @@ def get_dataset(dataset, reduced):
         ix = np.random.choice(len(Xtr), 4000, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
+    Xtr = Xtr.astype(np.float32)
+    Xts = Xts.astype(np.float32)
     ytr = utils.to_categorical(ytr)
     yts = utils.to_categorical(yts)
     return (Xtr, ytr), (Xts, yts)
@@ -73,7 +78,11 @@ OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
+<<<<<<< HEAD
 CHILD_BATCH_SIZE = 128
+=======
+CHILD_BATCH_SIZE = 64
+>>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
 CHILD_EPOCHS = 120
@@ -111,96 +120,19 @@ class Operation:
             t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
-
-            # if(t[3] == 'fgsm'):
-            #     self.model = fgsm
-            # elif(t[3] == 'lbfgs'):
-            #     self.model = lbfgs
-            # elif(t[3] == 'cwl2'):
-            #     self.model = cwl2
-            # elif(t[3] == 'df'):
-            #     self.model = df
-            # elif(t[3] == 'enm'):
-            #     self.model = enm
-            # elif(t[3] == 'mim'):
-            #     self.model = mim
-            # else:
-            #     assert(0)
             self.model = wrap
-            #self.model = model_map.get(t[3])
         self.transformation = t[0]
 
     def __call__(self, X):
         name = id_map[self.type]
-        print("now,",name)
-        # print(self.type)
-        # print(name)
-        # print(model_map[name])
-        # assert(0)
-        _X = []
-        x_use = None
-        id = []
-        tag = 0
-        #print(X[0][0][0][0].type)
-        X = X.astype(np.uint8)
-        #print(X.shape)
-        #assert(0)
-        for x in X:
-            if np.random.rand() < self.prob:
-                #with session.graph.as_default():
-                # print("tagx")
-                # print(x)
-                x = PIL.Image.fromarray(x)
-                x = tf.image.resize_images(x, [32, 32])
-                x.set_shape([32, 32, 3])
-                x = tf.expand_dims(x,0)
-                id.append(tag)
-                if(x_use == None):
-                    x_use = x
-                else:
-                    x_use = tf.concat([x_use,x],0)
-            tag = tag + 1
-        id.append(-1)
-        if(x_use != None):
-            x_use = tf.cast(x_use, tf.float32)
-            # fgsm_params = {'eps': self.magnitude}
-            x_use = self.transformation(x_use,self.magnitude,model_map[name])
-            # x_use = fgsm.generate(x_use, **fgsm_params)
-            #assert(0);
-            result = [tf.squeeze(tmp) for tmp in tf.split(x_use, [1 for i in range(x_use.shape[0])], 0)]
-            # result = tuple(result)
-            # print("rua1")
-            # print(name)
-            # print(x_use)
-            # print(len(result))
-            # assert(0)
-            with session.as_default():
-                result = session.run(result)
-            result = list(result)
-        tag = 0
-        npos = 0
-        # print("rua2")
-        # print(result)
-        for x in X:
-            # print(tag)
-            nv = x
-            # print("x",x.shape)
-            if(id[npos] == tag):
-                #with session.as_default():
-                nv=result[npos]
-                #nv = tf.squeeze(nv)
-                # print("x_use",x_use)
-                # print("nv",nv)
-                npos = npos + 1
-            tag = tag + 1
-
-            # with session.as_default():
-            _X.append(np.array(nv))
-        # print("tag1")
-        # print(_X)
-        # print("tag2")
-        print("finish,",name)
-        return np.array(_X)
+        idx = np.random.uniform(size=len(X))
+        idx = np.where(idx < self.prob)[0]
+        print(len(X), self.prob, len(idx))
+        for i in range(0, len(idx), CHILD_BATCH_SIZE):
+            tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
+            tensor = self.transformation(tensor, self.magnitude, model_map[name])
+            X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
+        return X
 
     def __str__(self):
         return 'Operation %2d (P=%.3f, M=%.3f)' % (self.type, self.prob, self.magnitude)
@@ -300,20 +232,6 @@ class Controller:
         #print(subpolicies)
         return softmaxes, subpolicies
 
-# generator
-def autoaugment(subpolicies, X, y):
-    while True:
-        ix = np.arange(len(X))
-        np.random.shuffle(ix)
-        for i in range(CHILD_BATCHES):
-            _ix = ix[i*CHILD_BATCH_SIZE:(i+1)*CHILD_BATCH_SIZE]
-            _X = X[_ix]
-            _y = y[_ix]
-            subpolicy = np.random.choice(subpolicies)
-            _X = subpolicy(_X)
-            _X = _X.astype(np.float32) / 255 # select from middle and put some subpolicy on that
-            yield _X, _y
-
 class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
     def __init__(self, input_shape):
@@ -334,6 +252,7 @@ class Child:
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
+<<<<<<< HEAD
         subpolicy = np.random.choice(subpolicies)
         # print(subpolicy)
 #        assert(0)
@@ -344,6 +263,15 @@ class Child:
         # assert(0)
         # print("base:",tf.get_default_graph())
         self.model.fit(X,y,CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, use_multiprocessing=True)
+=======
+        which = np.random.randint(len(subpolicies), size=len(X))
+        for i, subpolicy in enumerate(subpolicies):
+            X[which == i] = subpolicy(X[which == i])
+        callback = TQDMCallback(leave_inner=False, leave_outer=False)
+        callback.on_train_batch_begin = callback.on_batch_begin
+        callback.on_train_batch_end = callback.on_batch_end
+        self.model.fit(X, y, CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, callbacks=[callback])
+>>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
         return self
 
     def evaluate(self, X, y):
@@ -355,11 +283,17 @@ mem_accuracies = []
 
 controller = Controller()
 
+<<<<<<< HEAD
 ma = 0
 
 for epoch in range(CONTROLLER_EPOCHS):
 
     child = Child(Xtr.shape[1:])#(32,32,3)
+=======
+controller_iter = tqdm(range(CONTROLLER_EPOCHS), position=0)
+for epoch in controller_iter:
+    child = Child(Xtr.shape[1:])
+>>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
 
     wrap = KerasModelWrapper(child.model)
     fgsm = FastGradientMethod(wrap, sess=session)
@@ -385,8 +319,6 @@ for epoch in range(CONTROLLER_EPOCHS):
         print(subpolicy)
     mem_softmaxes.append(softmaxes)
 
-
-
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
@@ -408,7 +340,10 @@ for epoch in range(CONTROLLER_EPOCHS):
     if len(mem_softmaxes) > 5:
         # ricardo: I let some epochs pass, so that the normalization is more robust
         controller.fit(mem_softmaxes, mem_accuracies)
+<<<<<<< HEAD
     print()
+=======
+>>>>>>> 2115fa1f58f163154efdd83250f2826d4bc4733b
 
 print()
 print('Best policies found:')
