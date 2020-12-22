@@ -112,96 +112,17 @@ class Operation:
             t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
-
-            # if(t[3] == 'fgsm'):
-            #     self.model = fgsm
-            # elif(t[3] == 'lbfgs'):
-            #     self.model = lbfgs
-            # elif(t[3] == 'cwl2'):
-            #     self.model = cwl2
-            # elif(t[3] == 'df'):
-            #     self.model = df
-            # elif(t[3] == 'enm'):
-            #     self.model = enm
-            # elif(t[3] == 'mim'):
-            #     self.model = mim
-            # else:
-            #     assert(0)
             self.model = wrap
-            #self.model = model_map.get(t[3])
         self.transformation = t[0]
 
     def __call__(self, X):
         name = id_map[self.type]
-        print("now,",name)
-        # print(self.type)
-        # print(name)
-        # print(model_map[name])
-        # assert(0)
-        _X = []
-        x_use = None
-        id = []
-        tag = 0
-        #print(X[0][0][0][0].type)
-        X = X.astype(np.uint8)
-        #print(X.shape)
-        #assert(0)
-        for x in X:
-            if np.random.rand() < self.prob:
-                #with session.graph.as_default():
-                # print("tagx")
-                # print(x)
-                x = PIL.Image.fromarray(x)
-                x = tf.image.resize_images(x, [32, 32])
-                x.set_shape([32, 32, 3])
-                x = tf.expand_dims(x,0)
-                id.append(tag)
-                if(x_use == None):
-                    x_use = x
-                else:
-                    x_use = tf.concat([x_use,x],0)
-            tag = tag + 1
-        id.append(-1)
-        if(x_use != None):
-            x_use = tf.cast(x_use, tf.float32)
-            # fgsm_params = {'eps': self.magnitude}
-            x_use = self.transformation(x_use,self.magnitude,model_map[name])
-            # x_use = fgsm.generate(x_use, **fgsm_params)
-            #assert(0);
-            result = [tf.squeeze(tmp) for tmp in tf.split(x_use, [1 for i in range(x_use.shape[0])], 0)]
-            # result = tuple(result)
-            # print("rua1")
-            # print(name)
-            # print(x_use)
-            # print(len(result))
-            # assert(0)
-            with session.as_default():
-                result = session.run(result)
-            result = list(result)
-        tag = 0
-        npos = 0
-        # print("rua2")
-        # print(result)
-        for x in X:
-            # print(tag)
-            nv = x
-            # print("x",x.shape)
-            if(id[npos] == tag):
-                #with session.as_default():
-                nv=result[npos]
-                #nv = tf.squeeze(nv)
-                # print("x_use",x_use)
-                # print("nv",nv)
-                npos = npos + 1
-            tag = tag + 1
-
-            # with session.as_default():
-            _X.append(np.array(nv))
-        # print("tag1")
-        # print(_X)
-        # print("tag2")
-        print("finish,",name)
-        return np.array(_X)
+        idx = np.random.uniform(size=len(X))
+        tensor = tf.convert_to_tensor(X[idx < self.prob])
+        tensor = tf.cast(tensor, tf.float32)
+        tensor = self.transformation(tensor, self.magnitude, model_map[name])
+        X[idx < self.prob] = session.run(tensor)
+        return X
 
     def __str__(self):
         return 'Operation %2d (P=%.3f, M=%.3f)' % (self.type, self.prob, self.magnitude)
@@ -302,18 +223,18 @@ class Controller:
         return softmaxes, subpolicies
 
 # generator
-def autoaugment(subpolicies, X, y):
-    while True:
-        ix = np.arange(len(X))
-        np.random.shuffle(ix)
-        for i in range(CHILD_BATCHES):
-            _ix = ix[i*CHILD_BATCH_SIZE:(i+1)*CHILD_BATCH_SIZE]
-            _X = X[_ix]
-            _y = y[_ix]
-            subpolicy = np.random.choice(subpolicies)
-            _X = subpolicy(_X)
-            _X = _X.astype(np.float32) / 255 # select from middle and put some subpolicy on that
-            yield _X, _y
+# def autoaugment(subpolicies, X, y):
+#     while True:
+#         ix = np.arange(len(X))
+#         np.random.shuffle(ix)
+#         for i in range(CHILD_BATCHES):
+#             _ix = ix[i*CHILD_BATCH_SIZE:(i+1)*CHILD_BATCH_SIZE]
+#             _X = X[_ix]
+#             _y = y[_ix]
+#             subpolicy = np.random.choice(subpolicies)
+#             _X = subpolicy(_X)
+#             _X = _X.astype(np.float32) / 255 # select from middle and put some subpolicy on that
+#             yield _X, _y
 
 class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
@@ -366,7 +287,6 @@ for epoch in controller_iter:
     # lbfgs = LBFGS(wrap, sess=session)
     # cwl2 = CarliniWagnerL2(wrap, sess=session)
     df = DeepFool(wrap, sess=session)
-    df.generate
     # enm = ElasticNetMethod(wrap, sess=session)
     mim = MomentumIterativeMethod(wrap, sess=session)
 
