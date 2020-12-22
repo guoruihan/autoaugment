@@ -1,3 +1,7 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+
 import tensorflow as tf
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -57,6 +61,8 @@ def get_dataset(dataset, reduced):
         ix = np.random.choice(len(Xtr), 2048 * 8, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
+    Xtr = Xtr.astype(np.float32)
+    Xts = Xts.astype(np.float32)
     ytr = utils.to_categorical(ytr)
     yts = utils.to_categorical(yts)
     return (Xtr, ytr), (Xts, yts)
@@ -74,7 +80,7 @@ OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
-CHILD_BATCH_SIZE = 4096
+CHILD_BATCH_SIZE = 64
 CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
 
 CHILD_EPOCHS = 12
@@ -118,10 +124,12 @@ class Operation:
     def __call__(self, X):
         name = id_map[self.type]
         idx = np.random.uniform(size=len(X))
-        tensor = tf.convert_to_tensor(X[idx < self.prob])
-        tensor = tf.cast(tensor, tf.float32)
-        tensor = self.transformation(tensor, self.magnitude, model_map[name])
-        X[idx < self.prob] = session.run(tensor)
+        idx = np.where(idx < self.prob)[0]
+        print(len(X), self.prob, len(idx))
+        for i in range(0, len(idx), CHILD_BATCH_SIZE):
+            tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
+            tensor = self.transformation(tensor, self.magnitude, model_map[name])
+            X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
         return X
 
     def __str__(self):
@@ -222,20 +230,6 @@ class Controller:
         #print(subpolicies)
         return softmaxes, subpolicies
 
-# generator
-# def autoaugment(subpolicies, X, y):
-#     while True:
-#         ix = np.arange(len(X))
-#         np.random.shuffle(ix)
-#         for i in range(CHILD_BATCHES):
-#             _ix = ix[i*CHILD_BATCH_SIZE:(i+1)*CHILD_BATCH_SIZE]
-#             _X = X[_ix]
-#             _y = y[_ix]
-#             subpolicy = np.random.choice(subpolicies)
-#             _X = subpolicy(_X)
-#             _X = _X.astype(np.float32) / 255 # select from middle and put some subpolicy on that
-#             yield _X, _y
-
 class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
     def __init__(self, input_shape):
@@ -259,12 +253,10 @@ class Child:
         which = np.random.randint(len(subpolicies), size=len(X))
         for i, subpolicy in enumerate(subpolicies):
             X[which == i] = subpolicy(X[which == i])
-        X = X.astype(np.float32) / 255
         callback = TQDMCallback(leave_inner=False, leave_outer=False)
         callback.on_train_batch_begin = callback.on_batch_begin
         callback.on_train_batch_end = callback.on_batch_end
         self.model.fit(X, y, CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, callbacks=[callback])
-        # self.model.fit_generator(autoaugment(subpolicies, X, y), CHILD_BATCHES, CHILD_EPOCHS, verbose=0, callbacks=[TQDMCallback(leave_inner=False, leave_outer=False)])
         return self
 
     def evaluate(self, X, y):
@@ -278,9 +270,7 @@ controller = Controller()
 
 controller_iter = tqdm(range(CONTROLLER_EPOCHS), position=0)
 for epoch in controller_iter:
-    #print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
-
-    child = Child(Xtr.shape[1:])#(32,32,3)
+    child = Child(Xtr.shape[1:])
 
     wrap = KerasModelWrapper(child.model)
     fgsm = FastGradientMethod(wrap, sess=session)
@@ -306,8 +296,6 @@ for epoch in controller_iter:
     #    print(subpolicy)
     mem_softmaxes.append(softmaxes)
 
-
-
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
@@ -319,7 +307,6 @@ for epoch in controller_iter:
     if len(mem_softmaxes) > 5:
         # ricardo: I let some epochs pass, so that the normalization is more robust
         controller.fit(mem_softmaxes, mem_accuracies)
-    #print()
 
 print()
 print()
