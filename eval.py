@@ -13,13 +13,13 @@ backend.set_session(session)
 from keras_tqdm import TQDMCallback
 import numpy as np
 
-best_subpolicies = []
-attack_subpolicy = None
+best_subpolicies = [lambda x: x]
+attack_subpolicy = lambda x: x
 (Xtr, ytr), (Xts, yts) = datasets.cifar10.load_data()
 ytr = utils.to_categorical(ytr)
 yts = utils.to_categorical(yts)
 CHILD_BATCH_SIZE = 4096
-CHILD_EPOCHS = 200
+CHILD_EPOCHS = 5
 
 class TargetModel:
     def __init__(self, input_shape):
