@@ -1,6 +1,6 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
+import sys
 import tensorflow as tf
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -28,7 +28,7 @@ CHILD_EPOCHS = 120
 class TargetModel:
     def __init__(self, input_shape):
         self.model = self.create_model(input_shape)
-        optilmizer = optimizers.SGD(decay=1e-3)
+        optimizer = optimizers.SGD(decay=1e-3)
         self.model.compile(optimizer, 'categorical_crossentropy', ['accuracy'])
     def create_model(self, input_shape):
         x = input_layer = layers.Input(shape=input_shape)
@@ -68,6 +68,8 @@ if __name__ == "__main__":
         idx = np.where(idx < prob)[0]
         for i in tqdm(range(0, len(idx), CHILD_BATCH_SIZE), desc=f'batch: ', leave=False):
             tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
+            init = tf.global_variables_initializer()
+            session.run(init)
             tensor = wrapped.generate(tensor, eps=0.1 * magn)
             X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
         return X
@@ -78,6 +80,8 @@ if __name__ == "__main__":
         idx = np.where(idx < prob)[0]
         for i in tqdm(range(0, len(idx), CHILD_BATCH_SIZE), desc=f'batch: ', leave=False):
             tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
+            init = tf.global_variables_initializer()
+            session.run(init)
             tensor = wrapped.generate(tensor, clip_min=0., clip_max=magn * 0.3 + 0.3)
             X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
         return X
@@ -88,6 +92,8 @@ if __name__ == "__main__":
         idx = np.where(idx < prob)[0]
         for i in tqdm(range(0, len(idx), CHILD_BATCH_SIZE), desc=f'batch: ', leave=False):
             tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
+            init = tf.global_variables_initializer()
+            session.run(init)
             tensor = wrapped.generate(tensor, eps=0.1 * magn)
             X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
         return X
