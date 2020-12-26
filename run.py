@@ -1,4 +1,4 @@
-import os
+import os, sys
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
@@ -7,22 +7,19 @@ config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 tf.Graph().as_default()
 session = tf.compat.v1.Session(graph=tf.get_default_graph(),config=config)
-# print(tf.get_default_graph())
-# print(session.graph)
 import cleverhans
 
 from tensorflow.python.client import device_lib
-# print(device_lib.list_local_devices())
-# print(tf.test.is_built_with_cuda())
 
 from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
 backend.set_session(session)
-from transformations import get_transformations
+import transformations
 import PIL.Image
 import numpy as np
 import time
-from keras_tqdm import TQDMCallback
 from tqdm import tqdm
+from tqdm.keras import TqdmCallback
+import json
 
 fgsm = None
 lbfgs = None
@@ -58,77 +55,78 @@ def get_dataset(dataset, reduced):
     else:
         raise Exception('Unknown dataset %s' % dataset)
     if reduced:
-        ix = np.random.choice(len(Xtr), 2048 * 8, False)
+        ix = np.random.choice(len(Xtr), 4000, False)
         Xtr = Xtr[ix]
         ytr = ytr[ix]
-    Xtr = Xtr.astype(np.float32)
-    Xts = Xts.astype(np.float32)
+    Xtr = Xtr.astype(np.float32) / 255
+    Xts = Xts.astype(np.float32) / 255
     ytr = utils.to_categorical(ytr)
     yts = utils.to_categorical(yts)
     return (Xtr, ytr), (Xts, yts)
 
 (Xtr, ytr), (Xts, yts) = get_dataset('cifar10', True)
-transformations = get_transformations()
 # Experiment parameters
 
 LSTM_UNITS = 100
 
-SUBPOLICIES = 5
+SUBPOLICIES = 3
 SUBPOLICY_OPS = 2
 
 OP_TYPES = 3
 OP_PROBS = 11
 OP_MAGNITUDES = 10
 
-CHILD_BATCH_SIZE = 64
-CHILD_BATCHES = len(Xtr) // CHILD_BATCH_SIZE # '/' means normal divide, and '//' means integeral divide
+CHILD_BATCH_SIZE = 256
 
-CHILD_EPOCHS = 12
-CONTROLLER_EPOCHS = 5 # 15000 or 20000
+CHILD_EPOCHS = 200
+CONTROLLER_EPOCHS = 1000 # 15000 or 20000
 id_map = {
     0 : 'fgsm',
-    # # 0 : 'lbfgs',
+    # 1 : 'lbfgs',
     # 1 : 'cwl2',
     2 : 'df' ,
-    # 3 : 'enm' ,
+    # # 3 : 'enm' ,
     1 : 'mim'
 }
+wrapper_map = {
+    'fgsm': transformations.FGSM,
+    'df': transformations.DF,
+    'mim': transformations.MIM,
+}
 model_map = {
-        'fgsm' : fgsm,
-        # 'lbfgs' : lbfgs,
-        # 'cwl2' : cwl2,
-        'df' : df,
-        # 'enm' : enm,
-        'mim' : mim
-    }
+    'fgsm' : fgsm,
+    # 'lbfgs' : lbfgs,
+    # 'cwl2' : cwl2,
+    'df' : df,
+    # 'enm' : enm,
+    'mim' : mim
+}
+range_map = {
+    'fgsm': [0, 0.1],
+    'df': [0.3, 0.6],
+    'mim': [0, 0.1],
+}
 
 class Operation:
     def __init__(self, types_softmax, probs_softmax, magnitudes_softmax, argmax=False):
-        # Ekin Dogus says he sampled the softmaxes, and has not used argmax
-        # We might still want to use argmax=True for the last predictions, to ensure
-        # the best solutions are chosen and make it deterministic.
         if argmax:
             self.type = types_softmax.argmax()
-            t = transformations[self.type]
             self.prob = probs_softmax.argmax() / (OP_PROBS-1)
-            m = magnitudes_softmax.argmax() / (OP_MAGNITUDES-1)
-            self.magnitude = m*(t[2]-t[1]) + t[1]
+            self.magnitude = magnitudes_softmax.argmax() / (OP_MAGNITUDES-1)
         else:
             self.type = np.random.choice(OP_TYPES, p=types_softmax)
-            t = transformations[self.type]
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
-            self.magnitude = np.random.choice(np.linspace(t[1], t[2], OP_MAGNITUDES), p=magnitudes_softmax)
-            self.model = wrap
-        self.transformation = t[0]
+            self.magnitude = np.random.choice(np.linspace(0, 1, OP_MAGNITUDES), p=magnitudes_softmax)
+        self.type = id_map[self.type]
+        self.transformation = wrapper_map[self.type]
 
     def __call__(self, X):
-        name = id_map[self.type]
+        mi, ma = range_map[self.type]
         idx = np.random.uniform(size=len(X))
         idx = np.where(idx < self.prob)[0]
-        print(len(X), self.prob, len(idx))
-        for i in range(0, len(idx), CHILD_BATCH_SIZE):
+        for i in tqdm(range(0, len(idx), CHILD_BATCH_SIZE), desc='operation batch: ', file=sys.stdout, position=3, leave=False):
             tensor = tf.convert_to_tensor(X[idx[i:i + CHILD_BATCH_SIZE]])
-            tensor = self.transformation(tensor, self.magnitude, model_map[name])
+            tensor = self.transformation(tensor, self.magnitude * (ma - mi) + mi, model_map[self.type])
             X[idx[i:i + CHILD_BATCH_SIZE]] = session.run(tensor)
         return X
 
@@ -140,7 +138,7 @@ class Subpolicy:
         self.operations = operations
 
     def __call__(self, X):
-        for op in self.operations:
+        for op in tqdm(self.operations, desc='operation: ', file=sys.stdout, position=2, leave=False):
             X = op(X)
         return X
 
@@ -155,29 +153,19 @@ class Subpolicy:
 class Controller:
     def __init__(self):
         self.model = self.create_model()
-        self.scale = tf.placeholder(tf.float32, ()) #不确定大小的占位符，最后会传入最终的值
-        #print(self.model.outputs) #有一列model，输出结果也是一列
-        #print(self.model.trainable_weights) #不是很懂
-        self.grads = tf.gradients(self.model.outputs #模型输出张量的列表
-                                  , self.model.trainable_weights)#可以训练的变量list
-        #print(self.grads)
-        # negative for gradient ascent
+        self.scale = tf.placeholder(tf.float32, ())
+        self.grads = tf.gradients(self.model.outputs, self.model.trainable_weights)
         self.grads = [g * (-self.scale) for g in self.grads]
-        self.grads = zip(self.grads, self.model.trainable_weights) #直积
+        self.grads = zip(self.grads, self.model.trainable_weights)
         self.optimizer = tf.train.GradientDescentOptimizer(0.00035).apply_gradients(self.grads)
 
     def create_model(self):
-        # Implementation note: Keras requires an input. I create an input and then feed
-        # zeros to the network. Ugly, but it's the same as disabling those weights.
-        # Furthermore, Keras LSTM input=output, so we cannot produce more than SUBPOLICIES
-        # outputs. This is not desirable, since the paper produces 25 subpolicies in the
-        # end.
         input_layer = layers.Input(shape=(SUBPOLICIES, 1))
-        init = initializers.RandomUniform(-0.1, 0.1)#生成均匀分布的随机数
+        init = initializers.RandomUniform(-0.1, 0.1)
         lstm_layer = layers.LSTM(
-            LSTM_UNITS, #输出维度
-            recurrent_initializer=init, #给偏置进行初始化操作的方法
-            return_sequences=True,#返回全部输出的序列
+            LSTM_UNITS,
+            recurrent_initializer=init,
+            return_sequences=True,
             name='controller')(input_layer)
         outputs = []
         for i in range(SUBPOLICY_OPS):
@@ -187,73 +175,58 @@ class Controller:
                 layers.Dense(OP_PROBS, activation='softmax', name=name + 'p')(lstm_layer),
                 layers.Dense(OP_MAGNITUDES, activation='softmax', name=name + 'm')(lstm_layer),
             ]
-        #我们看到对每个操作里面建了三个网络，细节具体讨论
         return models.Model(input_layer, outputs)
 
     def fit(self, mem_softmaxes, mem_accuracies):
-        #session = backend.get_session() #我们在session里面计算tensor
         min_acc = np.min(mem_accuracies)
         max_acc = np.max(mem_accuracies)
         dummy_input = np.zeros((1, SUBPOLICIES, 1))
         dict_input = {self.model.input: dummy_input}
-        # FIXME: the paper does mini-batches (10)
-        for softmaxes, acc in zip(mem_softmaxes, mem_accuracies): # learn this way to programming
+        for softmaxes, acc in zip(mem_softmaxes, mem_accuracies):
             scale = (acc-min_acc) / (max_acc-min_acc)
             dict_outputs = {_output: s for _output, s in zip(self.model.outputs, softmaxes)}
             dict_scales = {self.scale: scale}
-            #print(dict_scales)
-            #print("rua")
-            session.run(self.optimizer,#单个图元素
-                        feed_dict={**dict_outputs, **dict_scales, **dict_input}) #将图元素映射到值的字典
+            session.run(self.optimizer,
+                        feed_dict={**dict_outputs, **dict_scales, **dict_input})
         return self
 
     def predict(self, size):
         dummy_input = np.zeros((1, size, 1), np.float32)
-        #没用的输入
         softmaxes = self.model.predict(dummy_input)
-        # print("softmaxes")
-        # print(softmaxes)
-        # print("shape")
-        # print(len(softmaxes))
-        # convert softmaxes into subpolicies
         subpolicies = []
         for i in range(SUBPOLICIES):
             operations = []
             for j in range(SUBPOLICY_OPS):
                 op = softmaxes[j*3:(j+1)*3]
-                #print("op")
-                #print(op)
                 op = [o[0, i, :] for o in op]
-                #print(op)
                 operations.append(Operation(*op))
             subpolicies.append(Subpolicy(*operations))
-        #print(subpolicies)
         return softmaxes, subpolicies
 
 class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
     def __init__(self, input_shape):
         self.model = self.create_model(input_shape)
-        optimizer = optimizers.SGD(decay=1e-3)
+        optimizer = optimizers.SGD(decay=1e-4)
         self.model.compile(optimizer, 'categorical_crossentropy', ['accuracy'])
 
     def create_model(self, input_shape):
         x = input_layer = layers.Input(shape=input_shape)
-        x = layers.Conv2D(32, 3, activation='relu')(x)# take in a tensor and give out another tensor
+        x = layers.Conv2D(32, 3, activation='relu')(x)
         x = layers.Conv2D(64, 3, activation='relu')(x)
         x = layers.MaxPooling2D(2)(x)
-        x = layers.Dropout(0.1)(x)
+        x = layers.Dropout(0.5)(x)
         x = layers.Flatten()(x)
-        x = layers.Dense(128, activation='relu')(x)
-        x = layers.Dropout(0.2)(x)
+        x = layers.Dense(64, activation='relu')(x)
+        x = layers.Dropout(0.5)(x)
         x = layers.Dense(10, activation='softmax')(x)
         return models.Model(input_layer, x)
 
     def fit(self, subpolicies, X, y):
         which = np.random.randint(len(subpolicies), size=len(X))
-        for i, subpolicy in enumerate(subpolicies):
+        for i, subpolicy in enumerate(tqdm(subpolicies, desc='subpolicy: ', file=sys.stdout, position=1, leave=False)):
             X[which == i] = subpolicy(X[which == i])
-        callback = TQDMCallback(leave_inner=False, leave_outer=False)
+        callback = TqdmCallback(leave=False, file=sys.stdout)
         callback.on_train_batch_begin = callback.on_batch_begin
         callback.on_train_batch_end = callback.on_batch_end
         self.model.fit(X, y, CHILD_BATCH_SIZE, CHILD_EPOCHS, verbose=0, callbacks=[callback])
@@ -267,49 +240,56 @@ mem_softmaxes = []
 mem_accuracies = []
 
 controller = Controller()
+with open("subpolicy_result", "w"):
+    pass
 
-controller_iter = tqdm(range(CONTROLLER_EPOCHS), position=0)
+controller_iter = tqdm(range(CONTROLLER_EPOCHS), desc='epoch: ', position=0, file=sys.stdout)
 for epoch in controller_iter:
     child = Child(Xtr.shape[1:])
 
     wrap = KerasModelWrapper(child.model)
     fgsm = FastGradientMethod(wrap, sess=session)
-    # lbfgs = LBFGS(wrap, sess=session)
+    lbfgs = LBFGS(wrap, sess=session)
     # cwl2 = CarliniWagnerL2(wrap, sess=session)
     df = DeepFool(wrap, sess=session)
     # enm = ElasticNetMethod(wrap, sess=session)
     mim = MomentumIterativeMethod(wrap, sess=session)
 
     model_map = {
-        'fgsm': fgsm,
-        # 'lbfgs': lbfgs,
-        # 'cwl2': cwl2,
-        'df': df,
-        # 'enm': enm,
-        'mim': mim
+        'fgsm' : fgsm,
+        # 'lbfgs' : lbfgs,
+        # 'cwl2' : cwl2,
+        'df' : df,
+        # 'enm' : enm,
+        'mim' : mim
     }
 
-    print('Controller: Epoch %d / %d' % (epoch+1, CONTROLLER_EPOCHS))
     softmaxes, subpolicies = controller.predict(SUBPOLICIES)
-    #for i, subpolicy in enumerate(subpolicies):
-    #    print('# Sub-policy %d' % (i+1))
-    #    print(subpolicy)
     mem_softmaxes.append(softmaxes)
 
     tic = time.time()
     child.fit(subpolicies, Xtr, ytr)
     toc = time.time()
     accuracy = child.evaluate(Xts, yts)
-    controller_iter.set_description(f'Controller - acc: {accuracy:.3f}')
-    #print('-> Child accuracy: %.3f (elaspsed time: %ds)' % (accuracy, (toc-tic)))
-    mem_accuracies.append(accuracy)# accuracy which was put into use
+    controller_iter.set_description(f'acc: {accuracy:.3f} | epoch: ')
+
+    with open("subpolicy_result", "a") as f:
+        ret = {
+            'acc': float(accuracy),
+            'subpolicy': [
+                [{
+                    'type': op.type,
+                    'prob': float(op.prob),
+                    'magnitude': float(op.magnitude),
+                } for op in subpolicy.operations] for subpolicy in subpolicies ]
+        }
+        f.write(json.dumps(ret) + '\n')
+
+    mem_accuracies.append(accuracy)
 
     if len(mem_softmaxes) > 5:
-        # ricardo: I let some epochs pass, so that the normalization is more robust
         controller.fit(mem_softmaxes, mem_accuracies)
 
-print()
-print()
 print()
 print('Best policies found:')
 print()

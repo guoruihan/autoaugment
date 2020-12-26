@@ -34,16 +34,16 @@ def FGSM(img, eps, model):
     fgsm_params = {'eps': eps}
     return model.generate(img, **fgsm_params)
 
-#
-# def LBFGS(img, eps, model):
-#     # lbfgs = FastGradientMethod(model)
-#     # print(tf.get_default_graph())
-#     # print(model.graph)
-#     # assert(0)
-#     # print(lbfgs.sess.graph)
-#     # assert(0)
-#     lbfgs_params = {}
-#     return model.generate(img, **lbfgs_params)
+
+def LBFGS(img, eps, model):
+    # lbfgs = FastGradientMethod(model)
+    # print(tf.get_default_graph())
+    # print(model.graph)
+    # assert(0)
+    # print(lbfgs.sess.graph)
+    # assert(0)
+    lbfgs_params = {}
+    return model.generate(img, **lbfgs_params)
 
 def CWL2(img, eps, model):
     # cwl2 = FastGradientMethod(model)
@@ -88,15 +88,15 @@ def MIM(img, eps, model):
 
 
 
-def get_transformations():
-    return [
+# def get_transformations():
+    # return [FGSM, MIM, DF
+        # (FGSM, 0, 1.0, 'fgsm'),
         # (LBFGS, 0, 1.0, 'lbfgs'),
-        (FGSM, 0, 1.0, 'fgsm'),
         # (CWL2, 0, 1.0, 'cwl2'),
+        # (DF, 0, 1.0, 'df'),
         # (ENM, 0, 1.0, 'enm'),
-        (MIM, 0, 1.0, 'mim'),
-        (DF, 0, 1.0, 'df'),
-    ]
+        # (MIM, 0, 1.0, 'mim'),
+    # ]
 
 
 def get_dataset(dataset, reduced):
@@ -118,7 +118,6 @@ def get_dataset(dataset, reduced):
 
 def attack(img):
     pass
-
 
 if __name__ == '__main__':
     print(Xtr[0].shape)
