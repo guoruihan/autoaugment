@@ -70,14 +70,14 @@ OP_MAGNITUDES = 10
 
 CHILD_BATCH_SIZE = 128
 
-CHILD_EPOCHS = 120
+CHILD_EPOCHS = 100
 CONTROLLER_EPOCHS = 2000 # 15000 or 20000
-attack_types = ['fgsm', 'df', 'mim']
+attack_types = ['fgsm', 'mim', 'df']
 attack_func_map = {}
 range_map = {
-    'fgsm': [0.005, 0.05],
-    'df': [0.005, 0.05],
-    'mim': [0.005, 0.05],
+    'fgsm': [0.01, 0.1],
+    'df': [1, 10],
+    'mim': [0.01, 0.1],
 }
 
 def fgsm(model):
@@ -109,7 +109,7 @@ def df(model):
         for i in tqdm(range(0, len(X), CHILD_BATCH_SIZE), desc=f'DF: ', file=sys.stdout, leave=False):
             # print(X[i:i+CHILD_BATCH_SIZE].shape)
             tensor = tf.convert_to_tensor(X[i:i + CHILD_BATCH_SIZE])
-            tensor = att.generate(tensor, clip_min=eps, clip_max=1 - eps, max_iter=5)
+            tensor = att.generate(tensor, nb_candidate=int(eps + 0.5))
             X[i:i + CHILD_BATCH_SIZE] = session.run(tensor)
             # import matplotlib.pyplot as plt
             # plt.imshow(X[i])
@@ -123,7 +123,7 @@ def mim(model):
         for i in tqdm(range(0, len(X), CHILD_BATCH_SIZE), desc=f'MIM: ', file=sys.stdout, leave=False):
             # print(X[i:i+CHILD_BATCH_SIZE].shape)
             tensor = tf.convert_to_tensor(X[i:i + CHILD_BATCH_SIZE])
-            tensor = att.generate(tensor, eps=eps)
+            tensor = att.generate(tensor, eps=eps, eps_iter=eps * 0.2)
             X[i:i + CHILD_BATCH_SIZE] = session.run(tensor)
     return attack
 
@@ -247,18 +247,20 @@ class Child:
 
     def fit(self, subpolicies, X, y, log_file, save_file):
         clean_x = X
+        clean_y = y
         epoch_tqdm = tqdm(range(CHILD_EPOCHS), desc='Epoch: ', file=sys.stdout, leave=False)
         losses, accs = [], []
         for epoch in epoch_tqdm:
             for i in tqdm(range(0, len(X), CHILD_BATCH_SIZE), desc=f'Batch: ', file=sys.stdout, leave=False):
                 self.model.train_on_batch(X[i:][:CHILD_BATCH_SIZE], y[i:][:CHILD_BATCH_SIZE])
-            loss, acc = self.model.evaluate(Xts, yts, verbose=False)
-            losses.append(float(loss))
-            accs.append(float(acc))
-            epoch_tqdm.set_description(f'Loss {loss:.3f} {acc:.3f} | Epoch {epoch}')
             # return
             if epoch % 10 == 0:
+                loss, acc = self.model.evaluate(Xts, yts, verbose=False)
+                losses.append(float(loss))
+                accs.append(float(acc))
+                epoch_tqdm.set_description(f'Loss {loss:.3f} {acc:.3f} | Epoch {epoch}')
                 X = clean_x.copy()
+                y = clean_y.copy()
                 shuffle_idx = np.arange(len(X))
                 np.random.shuffle(shuffle_idx)
                 X = X[shuffle_idx]
@@ -266,6 +268,11 @@ class Child:
                 which = np.random.randint(len(subpolicies), size=len(X))
                 for i, subpolicy in enumerate(tqdm(subpolicies, desc='Subpolicy: ', file=sys.stdout, leave=False)):
                     subpolicy(X[which == i])
+                # if epoch >= 30:
+                #     import matplotlib.pyplot as plt
+                #     print(X[0])
+                #     plt.imshow(X[0])
+                #     plt.show()
         with open(log_file, 'w') as f:
             f.write(json.dumps({
                 'loss': losses,
