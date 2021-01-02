@@ -3,10 +3,9 @@ import os, sys
 # os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 import tensorflow as tf
+
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-tf.Graph().as_default()
-session = tf.compat.v1.Session(graph=tf.get_default_graph(),config=config)
 
 controllerGraph = tf.Graph()
 controllerSession = tf.compat.v1.Session(graph = controllerGraph,config = config)
@@ -15,7 +14,6 @@ import cleverhans
 from tensorflow.python.client import device_lib
 
 from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
-backend.set_session(session)
 import transformations
 import PIL.Image
 import numpy as np
@@ -300,6 +298,10 @@ with open("subpolicy_result", "w"):
 
 controller_iter = tqdm(range(CONTROLLER_EPOCHS), desc='Controller Epoch: ', position=0, file=sys.stdout, leave=False)
 for epoch in controller_iter:
+    tf.Graph().as_default()
+    session = tf.compat.v1.Session(graph=tf.get_default_graph(), config=config)
+    backend.set_session(session)
+
     child = Child(Xtr.shape[1:])
     attack_func_map = {
         'fgsm' : fgsm(child.model),
