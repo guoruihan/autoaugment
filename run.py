@@ -169,32 +169,30 @@ class Subpolicy:
 
 class Controller:
     def __init__(self):
-        with controllerGraph.as_default():
-            self.model = self.create_model()
-            self.scale = tf.placeholder(tf.float32, ())
-            self.grads = tf.gradients(self.model.outputs, self.model.trainable_weights)
-            self.grads = [g * (-self.scale) for g in self.grads]
-            self.grads = zip(self.grads, self.model.trainable_weights)
-            self.optimizer = tf.train.GradientDescentOptimizer(0.00035).apply_gradients(self.grads)
+        self.model = self.create_model()
+        self.scale = tf.placeholder(tf.float32, ())
+        self.grads = tf.gradients(self.model.outputs, self.model.trainable_weights)
+        self.grads = [g * (-self.scale) for g in self.grads]
+        self.grads = zip(self.grads, self.model.trainable_weights)
+        self.optimizer = tf.train.GradientDescentOptimizer(0.00035).apply_gradients(self.grads)
 
     def create_model(self):
-        with controllerGraph.as_default():
-            input_layer = layers.Input(shape=(SUBPOLICIES, 1))
-            init = initializers.RandomUniform(-0.1, 0.1)
-            lstm_layer = layers.LSTM(
-                LSTM_UNITS,
-                recurrent_initializer=init,
-                return_sequences=True,
-                name='controller')(input_layer)
-            outputs = []
-            for i in range(SUBPOLICY_OPS):
-                name = 'op%d-' % (i+1)
-                outputs += [
-                    layers.Dense(OP_TYPES, activation='softmax', name=name + 't')(lstm_layer),
-                    layers.Dense(OP_PROBS, activation='softmax', name=name + 'p')(lstm_layer),
-                    layers.Dense(OP_MAGNITUDES, activation='softmax', name=name + 'm')(lstm_layer),
-                ]
-            return models.Model(input_layer, outputs)
+        input_layer = layers.Input(shape=(SUBPOLICIES, 1))
+        init = initializers.RandomUniform(-0.1, 0.1)
+        lstm_layer = layers.LSTM(
+            LSTM_UNITS,
+            recurrent_initializer=init,
+            return_sequences=True,
+            name='controller')(input_layer)
+        outputs = []
+        for i in range(SUBPOLICY_OPS):
+            name = 'op%d-' % (i+1)
+            outputs += [
+                layers.Dense(OP_TYPES, activation='softmax', name=name + 't')(lstm_layer),
+                layers.Dense(OP_PROBS, activation='softmax', name=name + 'p')(lstm_layer),
+                layers.Dense(OP_MAGNITUDES, activation='softmax', name=name + 'm')(lstm_layer),
+            ]
+        return models.Model(input_layer, outputs)
 
     # def fit(self, mem_softmaxes, mem_accuracies):
     #     # min_acc = np.min(mem_accuracies)
@@ -210,26 +208,24 @@ class Controller:
     #                     feed_dict={**dict_outputs, **dict_input, **dict_scales})
     #     return self
     def fit(self, softmaxes, accuracy):
-        with controllerGraph.as_default():
-            controllerSession.run(self.optimizer, feed_dict={
-                **{_output: s for _output, s in zip(self.model.outputs, softmaxes)},
-                self.model.input: np.zeros((1, SUBPOLICIES, 1)),
-                self.scale: accuracy - 0.1,
-            })
+        controllerSession.run(self.optimizer, feed_dict={
+            **{_output: s for _output, s in zip(self.model.outputs, softmaxes)},
+            self.model.input: np.zeros((1, SUBPOLICIES, 1)),
+            self.scale: accuracy - 0.1,
+        })
 
     def predict(self, size, argmax=False):
-        with controllerGraph.as_default():
-            dummy_input = np.zeros((1, size, 1), np.float32)
-            softmaxes = self.model.predict(dummy_input)
-            subpolicies = []
-            for i in range(SUBPOLICIES):
-                operations = []
-                for j in range(SUBPOLICY_OPS):
-                    op = softmaxes[j*3:(j+1)*3]
-                    op = [o[0, i, :] for o in op]
-                    operations.append(Operation(*op, argmax=argmax))
-                subpolicies.append(Subpolicy(*operations))
-            return softmaxes, subpolicies
+        dummy_input = np.zeros((1, size, 1), np.float32)
+        softmaxes = self.model.predict(dummy_input)
+        subpolicies = []
+        for i in range(SUBPOLICIES):
+            operations = []
+            for j in range(SUBPOLICY_OPS):
+                op = softmaxes[j*3:(j+1)*3]
+                op = [o[0, i, :] for o in op]
+                operations.append(Operation(*op, argmax=argmax))
+            subpolicies.append(Subpolicy(*operations))
+        return softmaxes, subpolicies
 
 class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
@@ -292,7 +288,8 @@ class Child:
 mem_softmaxes = []
 mem_accuracies = []
 
-controller = Controller()
+with controllerGraph.as_default():
+    controller = Controller()
 with open("subpolicy_result", "w"):
     pass
 
@@ -308,8 +305,8 @@ for epoch in controller_iter:
         'df' : df(child.model),
         'mim' : mim(child.model),
     }
-
-    softmaxes, subpolicies = controller.predict(SUBPOLICIES, argmax=epoch % 10 == 9)
+    with controllerGraph.as_default():
+        softmaxes, subpolicies = controller.predict(SUBPOLICIES, argmax=epoch % 10 == 9)
 
 
     # mem_softmaxes.append(softmaxes)
@@ -335,7 +332,8 @@ for epoch in controller_iter:
         f.write(json.dumps(ret) + '\n')
 
     # mem_accuracies.append(accuracy)
-    controller.fit(softmaxes, accuracy)
+    with controllerGraph.as_default():
+        controller.fit(softmaxes, accuracy)
 
     # if len(mem_softmaxes) > 5:
         # controller.fit(mem_softmaxes, mem_accuracies)
