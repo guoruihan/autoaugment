@@ -7,10 +7,11 @@ import tensorflow as tf
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 
-controllerGraph = tf.Graph()
-controllerSession = tf.compat.v1.Session(graph = controllerGraph,config = config)
+# controllerGraph = tf.Graph()
+# controllerSession = tf.compat.v1.Session(graph = controllerGraph,config = config)
 import cleverhans
-
+childGraph = None
+session = None
 from tensorflow.python.client import device_lib
 
 from tensorflow.keras import models, layers, datasets, utils, backend, optimizers, initializers
@@ -80,7 +81,10 @@ range_map = {
     'df': [1, 10],
     'mim': [0.01, 0.1],
 }
-
+def debug(session):
+    pass
+    # print(session.graph)
+    # assert (0)
 def fgsm(model):
     wrap = KerasModelWrapper(model)
     att = FastGradientMethod(wrap, sess=session)
@@ -89,6 +93,8 @@ def fgsm(model):
             # print(X[i:i+CHILD_BATCH_SIZE].shape)
             tensor = tf.convert_to_tensor(X[i:i + CHILD_BATCH_SIZE])
             tensor = att.generate(tensor, eps=eps)
+            tf.compat.v1.disable_eager_execution()
+            debug(session)
             X[i:i + CHILD_BATCH_SIZE] = session.run(tensor)
     return attack
 
@@ -100,6 +106,8 @@ def lbfgs(model):
             # print(X[i:i+CHILD_BATCH_SIZE].shape)
             tensor = tf.convert_to_tensor(X[i:i + CHILD_BATCH_SIZE])
             tensor = att.generate(tensor, batch_size=len(X[i:i + CHILD_BATCH_SIZE]), max_iterations=4, binary_search_steps=3)
+            tf.compat.v1.disable_eager_execution()
+            debug(session)
             X[i:i + CHILD_BATCH_SIZE] = session.run(tensor)
     return attack
 
@@ -111,6 +119,8 @@ def df(model):
             # print(X[i:i+CHILD_BATCH_SIZE].shape)
             tensor = tf.convert_to_tensor(X[i:i + CHILD_BATCH_SIZE])
             tensor = att.generate(tensor, nb_candidate=int(eps + 0.5))
+            tf.compat.v1.disable_eager_execution()
+            debug(session)
             X[i:i + CHILD_BATCH_SIZE] = session.run(tensor)
             # import matplotlib.pyplot as plt
             # plt.imshow(X[i])
@@ -125,6 +135,8 @@ def mim(model):
             # print(X[i:i+CHILD_BATCH_SIZE].shape)
             tensor = tf.convert_to_tensor(X[i:i + CHILD_BATCH_SIZE])
             tensor = att.generate(tensor, eps=eps, eps_iter=eps * 0.2)
+            tf.compat.v1.disable_eager_execution()
+            debug(session)
             X[i:i + CHILD_BATCH_SIZE] = session.run(tensor)
     return attack
 
@@ -139,7 +151,8 @@ class Operation:
             self.prob = np.random.choice(np.linspace(0, 1, OP_PROBS), p=probs_softmax)
             self.magnitude = np.random.choice(np.linspace(0, 1, OP_MAGNITUDES), p=magnitudes_softmax)
         self.type = attack_types[self.type]
-        self.transformation = attack_func_map[self.type]
+        with childGraph.as_default():
+            self.transformation = attack_func_map[self.type]
         mi, ma = range_map[self.type]
         self.magnitude = self.magnitude * (ma - mi) + mi
 
@@ -208,7 +221,12 @@ class Controller:
     #                     feed_dict={**dict_outputs, **dict_input, **dict_scales})
     #     return self
     def fit(self, softmaxes, accuracy):
-        controllerSession.run(self.optimizer, feed_dict={
+        # controllerSession.run(self.optimizer, feed_dict={
+        #     **{_output: s for _output, s in zip(self.model.outputs, softmaxes)},
+        #     self.model.input: np.zeros((1, SUBPOLICIES, 1)),
+        #     self.scale: accuracy - 0.1,
+        # })
+        session.run(self.optimizer, feed_dict={
             **{_output: s for _output, s in zip(self.model.outputs, softmaxes)},
             self.model.input: np.zeros((1, SUBPOLICIES, 1)),
             self.scale: accuracy - 0.1,
@@ -230,6 +248,8 @@ class Controller:
 class Child:
     # architecture from: https://github.com/keras-team/keras/blob/master/examples/mnist_cnn.py
     def __init__(self, input_shape):
+        print(tf.get_default_graph())
+        print("graph")
         self.model = self.create_model(input_shape)
         optimizer = optimizers.SGD(decay=1e-3)
         self.model.compile(optimizer, 'categorical_crossentropy', ['accuracy'])
@@ -288,16 +308,20 @@ class Child:
 mem_softmaxes = []
 mem_accuracies = []
 
-with controllerGraph.as_default():
-    controller = Controller()
+# with controllerGraph.as_default():
+tf.reset_default_graph()
+childGraph = tf.get_default_graph()
+childGraph.as_default()
+session = tf.compat.v1.Session(graph=childGraph, config=config)
+session.as_default()
+controller = Controller()
 with open("subpolicy_result", "w"):
     pass
 
+# with controllerGraph.as_default():
 controller_iter = tqdm(range(CONTROLLER_EPOCHS), desc='Controller Epoch: ', position=0, file=sys.stdout, leave=False)
 for epoch in controller_iter:
-    tf.Graph().as_default()
-    session = tf.compat.v1.Session(graph=tf.get_default_graph(), config=config)
-    backend.set_session(session)
+
 
     child = Child(Xtr.shape[1:])
     attack_func_map = {
@@ -305,9 +329,13 @@ for epoch in controller_iter:
         'df' : df(child.model),
         'mim' : mim(child.model),
     }
-    with controllerGraph.as_default():
-        softmaxes, subpolicies = controller.predict(SUBPOLICIES, argmax=epoch % 10 == 9)
-
+    # with controllerGraph.as_default(),controllerSession.as_default():
+    #     print(tf.get_default_graph())
+    #     print("graph")
+    softmaxes, subpolicies = controller.predict(SUBPOLICIES, argmax=epoch % 10 == 9)
+    print(tf.get_default_graph())
+    print("graph")
+    # assert(0)
 
     # mem_softmaxes.append(softmaxes)
 
@@ -332,8 +360,8 @@ for epoch in controller_iter:
         f.write(json.dumps(ret) + '\n')
 
     # mem_accuracies.append(accuracy)
-    with controllerGraph.as_default():
-        controller.fit(softmaxes, accuracy)
+    #with controllerGraph.as_default(),controllerSession.as_default():
+    controller.fit(softmaxes, accuracy)
 
     # if len(mem_softmaxes) > 5:
         # controller.fit(mem_softmaxes, mem_accuracies)
