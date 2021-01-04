@@ -93,7 +93,7 @@ criterion = nn.CrossEntropyLoss()
 
 def train_child(t, p, m, num=0):
     # model = nn.DataParallel(TestCNN().cuda(1), device_ids=[1, 2, 3])
-    model = TestCNN().cuda(0)
+    model = TestCNN().cpu()
     tf_model = convert_pytorch_model_to_tf(model)
     cleverhans_model = CallableModelWrapper(tf_model, output_layer='logits')
     session = tf.Session()
@@ -194,39 +194,51 @@ class Policy(nn.Module):
         self.embed = nn.Embedding(SUBPOLICY_COUNT * OPERATION_COUNT, 10)
         self.fc1 = nn.Linear(10, 32)
         self.relu = nn.ReLU()
-        self.fc_type = nn.Linear(32, TYPE_COUNT)
-        self.fc_prob = nn.Linear(32, PROB_COUNT)
-        self.fc_magn = nn.Linear(32, MAGN_COUNT)
-        self.softmax_type = nn.Softmax(dim=-1)
-        self.softmax_prob = nn.Softmax(dim=-1)
-        self.softmax_magn = nn.Softmax(dim=-1)
+        self.fc_type1 = nn.Linear(32, TYPE_COUNT)
+        self.fc_prob1 = nn.Linear(32, PROB_COUNT)
+        self.fc_magn1 = nn.Linear(32, MAGN_COUNT)
+        self.softmax_type1 = nn.Softmax(dim=-1)
+        self.softmax_prob1 = nn.Softmax(dim=-1)
+        self.softmax_magn1 = nn.Softmax(dim=-1)
+        self.fc_type2 = nn.Linear(32, TYPE_COUNT)
+        self.fc_prob2 = nn.Linear(32, PROB_COUNT)
+        self.fc_magn2 = nn.Linear(32, MAGN_COUNT)
+        self.softmax_type2 = nn.Softmax(dim=-1)
+        self.softmax_prob2 = nn.Softmax(dim=-1)
+        self.softmax_magn2 = nn.Softmax(dim=-1)
         self.policy_history = Variable(torch.Tensor())
         self.reward_history = []
     def forward(self, x):
         x = self.embed(x)
         x = self.fc1(x)
         x = self.relu(x)
-        t = self.softmax_type(self.fc_type(x))
-        p = self.softmax_prob(self.fc_prob(x))
-        m = self.softmax_magn(self.fc_magn(x))
-        return t, p, m
+        t1 = self.softmax_type1(self.fc_type1(x))
+        p1 = self.softmax_prob1(self.fc_prob1(x))
+        m1 = self.softmax_magn1(self.fc_magn1(x))
+        t2 = self.softmax_type2(self.fc_type2(x))
+        p2 = self.softmax_prob2(self.fc_prob2(x))
+        m2 = self.softmax_magn2(self.fc_magn2(x))
+        return t1, p1, m1, t2, p2, m2
 
 policy = Policy()
 policy_optimizer = optim.Adam(policy.parameters(), lr=1e-2)
 
 def select_action(num=0):
-    t, p, m = policy(torch.tensor(range(SUBPOLICY_COUNT * OPERATION_COUNT), dtype=torch.long))
-    tc, pc, mc = Categorical(t), Categorical(p), Categorical(m)
-    t, p, m = tc.sample(), pc.sample(), mc.sample()
-    def trans(x):
-        return x.detach().cpu().numpy().reshape((SUBPOLICY_COUNT, OPERATION_COUNT, -1)).tolist()
-    raw_acc, adv_acc = train_child(trans(t), trans(p), trans(m), num)
-    loss = -adv_acc * (tc.log_prob(t).sum() + pc.log_prob(p).sum() + mc.log_prob(m).sum())
-    policy_optimizer.zero_grad()
-    loss.backward()
-    policy_optimizer.step()
-    with open('runs/controller.csv', 'a') as f:
-        f.write(f'{trans(t)},{trans(p)},{trans(m)},{raw_acc},{adv_acc}\n')
+    t0 = p0 = m0 = [0,0]
+    t0[0], p0[0], m0[0], t0[1], p0[1], m0[1] = policy(torch.tensor(range(SUBPOLICY_COUNT * OPERATION_COUNT), dtype=torch.long))
+    for id in range(2):
+        t, p, m = t0[id], p0[id], m0[id]
+        tc, pc, mc = Categorical(t), Categorical(p), Categorical(m)
+        t, p, m = tc.sample(), pc.sample(), mc.sample()
+        def trans(x):
+            return x.detach().cpu().numpy().reshape((SUBPOLICY_COUNT, OPERATION_COUNT, -1)).tolist()
+        raw_acc, adv_acc = train_child(trans(t), trans(p), trans(m), num)
+        loss = -adv_acc * (tc.log_prob(t).sum() + pc.log_prob(p).sum() + mc.log_prob(m).sum())
+        policy_optimizer.zero_grad()
+        loss.backward()
+        policy_optimizer.step()
+        with open('runs/controller.csv', 'a') as f:
+            f.write(f'{trans(t)},{trans(p)},{trans(m)},{raw_acc},{adv_acc}\n')
 
 with open('runs/controller.csv', 'w') as f:
     pass

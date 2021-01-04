@@ -194,19 +194,6 @@ class Controller:
             ]
         return models.Model(input_layer, outputs)
 
-    # def fit(self, mem_softmaxes, mem_accuracies):
-    #     # min_acc = np.min(mem_accuracies)
-    #     # max_acc = np.max(mem_accuracies)
-    #     dummy_input = np.zeros((1, SUBPOLICIES, 1))
-    #     dict_input = {self.model.input: dummy_input}
-    #     for softmaxes, acc in zip(mem_softmaxes, mem_accuracies):
-    #         # scale = (acc-min_acc) / (max_acc-min_acc)
-    #         scale = acc
-    #         dict_outputs = {_output: s for _output, s in zip(self.model.outputs, softmaxes)}
-    #         dict_scales = {self.scale: scale}
-    #         session.run(self.optimizer,
-    #                     feed_dict={**dict_outputs, **dict_input, **dict_scales})
-    #     return self
     def fit(self, softmaxes, accuracy):
         controllerSession.run(self.optimizer, feed_dict={
             **{_output: s for _output, s in zip(self.model.outputs, softmaxes)},
@@ -222,9 +209,13 @@ class Controller:
             operations = []
             for j in range(SUBPOLICY_OPS):
                 op = softmaxes[j*3:(j+1)*3]
+                print(len(op))
+                print(op)
                 op = [o[0, i, :] for o in op]
+                print(op)
                 operations.append(Operation(*op, argmax=argmax))
             subpolicies.append(Subpolicy(*operations))
+        assert(0)
         return softmaxes, subpolicies
 
 class Child:
