@@ -15,6 +15,7 @@ from cleverhans.utils_pytorch import convert_pytorch_model_to_tf
 from cleverhans.model import CallableModelWrapper
 from cleverhans.attacks import CarliniWagnerL2, FastGradientMethod, LBFGS, DeepFool, MaxConfidence, MomentumIterativeMethod, ProjectedGradientDescent, SpatialTransformationMethod, Noise
 import tensorflow as tf
+import os
 
 POLICY_EPOCH = 500
 REDUCE = 2048 * 16
@@ -114,7 +115,7 @@ def train_child(t, p, m, num=0):
     # def cw2_op(x, eps):
     #     att = cw2.generate(x_op, max_iterations=3)
     def pgd_op(x, eps):
-        att = pgd.generate(x_op, eps=eps, eps_iter=eps * 0.2)
+        att = pgd.generate(x_op, eps=eps, eps_iter=eps * 0.2, nb_iter=3)
         return session.run(att, feed_dict={x_op: x})
     def noise_op(x, eps):
         att = noise.generate(x_op, eps=eps)
@@ -172,7 +173,7 @@ def train_child(t, p, m, num=0):
             epoch_tqdm.set_description(f'{raw_loss:.3f} {raw_acc:.3f}')
     val_x_adv = np.zeros_like(val_x)
     for i in tqdm(range(0, len(val_x_adv), BATCH_SIZE), desc='DF: ', leave=False):
-        val_x_adv[i:][:BATCH_SIZE] = pgd_op(val_x[i:][:BATCH_SIZE], 0.2)
+        val_x_adv[i:][:BATCH_SIZE] = pgd_op(val_x[i:][:BATCH_SIZE], 0.01)
     adv_valset = torch.utils.data.TensorDataset(torch.tensor(val_x_adv, dtype=torch.float), torch.tensor(val_y, dtype=torch.long))
     adv_valloader = torch.utils.data.DataLoader(adv_valset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
     batch_tqdm = tqdm(adv_valloader, leave=False)
@@ -228,8 +229,14 @@ def select_action(num=0):
     with open('runs/controller.csv', 'a') as f:
         f.write(f'{trans(t)},{trans(p)},{trans(m)},{raw_acc},{adv_acc}\n')
 
-with open('runs/controller.csv', 'w') as f:
-    pass
-
-for epoch in tqdm(range(POLICY_EPOCH), desc='Controller: ', leave=False):
-    select_action(num=epoch)
+num = 0
+if os.path.isfile('runs/controller_cnt.txt'):
+    policy.load_state_dict(torch.load('runs/controller.pt'))
+    policy_optimizer.load_state_dict(torch.load('runs/controller_optimizer.pt'))
+    with open('runs/controller_cnt.txt') as f:
+        num = int(f.read())
+select_action(num)
+torch.save(policy.state_dict(), 'runs/controller.pt')
+torch.save(policy_optimizer.state_dict(), 'runs/controller_optimizer.pt')
+with open('runs/controller_cnt.txt', 'w') as f:
+    f.write(f'{num + 1}')
