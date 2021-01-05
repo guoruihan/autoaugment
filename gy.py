@@ -189,6 +189,8 @@ def train_child(t, p, m, num=0):
     return raw_acc, adv_acc
 
 
+accuracy_cache = []
+
 class Policy(nn.Module):
     def __init__(self):
         super().__init__()
@@ -222,10 +224,15 @@ def select_action(num=0):
     def trans(x):
         return x.detach().cpu().numpy().reshape((SUBPOLICY_COUNT, OPERATION_COUNT, -1)).tolist()
     raw_acc, adv_acc = train_child(trans(t), trans(p), trans(m), num)
-    loss = -adv_acc * (tc.log_prob(t).sum() + pc.log_prob(p).sum() + mc.log_prob(m).sum())
-    policy_optimizer.zero_grad()
-    loss.backward()
-    policy_optimizer.step()
+    accuracy_cache.append(adv_acc)
+    if(num > 2):
+        min_acc = np.min(accuracy_cache)
+        max_acc = np.max(accuracy_cache)
+        scale = (adv_acc-min_acc) / (max_acc-min_acc)
+        loss = -adv_acc * scale * (tc.log_prob(t).sum() + pc.log_prob(p).sum() + mc.log_prob(m).sum())
+        policy_optimizer.zero_grad()
+        loss.backward()
+        policy_optimizer.step()
     with open('runs/controller.csv', 'a') as f:
         f.write(f'{trans(t)},{trans(p)},{trans(m)},{raw_acc},{adv_acc}\n')
 
