@@ -16,14 +16,14 @@ from cleverhans.model import CallableModelWrapper
 from cleverhans.attacks import CarliniWagnerL2, FastGradientMethod, LBFGS, DeepFool, MaxConfidence, MomentumIterativeMethod, ProjectedGradientDescent, SpatialTransformationMethod, Noise
 import tensorflow as tf
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-POLICY_EPOCH = 500
-REDUCE = 2048 * 16
+REDUCE = None
 BATCH_SIZE = 4096
 CHANNELS = [16, 32, 64, 32]
 HIDDEN = 128
-CHILD_EPOCHS = 80
-ADVERSIAL_EVERY = 5
+CHILD_EPOCHS = 1000
+ADVERSIAL_EVERY = 1
 SUBPOLICY_COUNT = 3
 OPERATION_COUNT = 2
 TYPE_COUNT = 3
@@ -37,7 +37,7 @@ valraw = torchvision.datasets.CIFAR10(root='data', train=False, download=True)
 val_x, val_y = np.array(valraw.data, dtype=float).transpose((0, 3, 1, 2)), np.array(valraw.targets)
 val_x /= 255
 
-if REDUCE:
+if REDUCE is not None:
     train_idx = np.arange(len(train_x))
     np.random.shuffle(train_idx)
     train_x = train_x[train_idx[:REDUCE]]
@@ -47,6 +47,8 @@ if REDUCE:
     val_x = val_x[val_idx[:REDUCE]]
     val_y = val_y[val_idx[:REDUCE]]
 
+trainset = torch.utils.data.TensorDataset(torch.tensor(train_x, dtype=torch.float), torch.tensor(train_y, dtype=torch.long))
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
 valset = torch.utils.data.TensorDataset(torch.tensor(val_x, dtype=torch.float), torch.tensor(val_y, dtype=torch.long))
 valloader = torch.utils.data.DataLoader(valset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
 
@@ -92,8 +94,9 @@ class TestCNN(nn.Module):
 
 criterion = nn.CrossEntropyLoss()
 
-def train_child(t, p, m, num=0):
+def train_child(t, p, m, load_dict=False):
     # model = nn.DataParallel(TestCNN().cuda(1), device_ids=[1, 2, 3])
+    raw_model = TestCNN().cuda(0)
     model = TestCNN().cuda(0)
     tf_model = convert_pytorch_model_to_tf(model)
     cleverhans_model = CallableModelWrapper(tf_model, output_layer='logits')
@@ -106,6 +109,9 @@ def train_child(t, p, m, num=0):
     noise = Noise(cleverhans_model, sess=session)
     mim = MomentumIterativeMethod(cleverhans_model, sess=session)
     df = DeepFool(cleverhans_model, sess=session)
+    tf_raw_model = convert_pytorch_model_to_tf(raw_model)
+    cleverhans_raw_model = CallableModelWrapper(tf_raw_model, output_layer='logits')
+    pgd_raw = ProjectedGradientDescent(cleverhans_raw_model, sess=session)
     def fgsm_op(x, eps):
         att = fgsm.generate(x_op, eps=eps)
         return session.run(att, feed_dict={x_op: x})
@@ -116,6 +122,9 @@ def train_child(t, p, m, num=0):
     #     att = cw2.generate(x_op, max_iterations=3)
     def pgd_op(x, eps):
         att = pgd.generate(x_op, eps=eps, eps_iter=eps * 0.2, nb_iter=3)
+        return session.run(att, feed_dict={x_op: x})
+    def pgd_raw_op(x, eps):
+        att = pgd_raw.generate(x_op, eps=eps, eps_iter=eps * 0.2, nb_iter=3)
         return session.run(att, feed_dict={x_op: x})
     def noise_op(x, eps):
         att = noise.generate(x_op, eps=eps)
@@ -140,111 +149,87 @@ def train_child(t, p, m, num=0):
                 for i in tqdm(range(0, len(adv_j), BATCH_SIZE), desc=attacks_name[tj] + ': ', leave=False):
                     adv_j[i:][:BATCH_SIZE] = attacks[tj](adv_j[i:][:BATCH_SIZE], (mj + 1) / MAGN_COUNT * (eps[tj][1] - eps[tj][0]) + eps[tj][0])
         return train_x_adv
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    epoch_tqdm = tqdm(range(CHILD_EPOCHS), leave=False)
-    trainloader = []
-    for epoch in epoch_tqdm:
-        if epoch % ADVERSIAL_EVERY == 0:
-            train_x_adv = attack_train(train_x)
-            trainset = torch.utils.data.TensorDataset(torch.tensor(train_x_adv, dtype=torch.float), torch.tensor(train_y, dtype=torch.long))
-            trainloader = torch.utils.data.DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
-        batch_tqdm = tqdm(trainloader, leave=False)
-        for x, y in batch_tqdm:
-            model.train()
-            optimizer.zero_grad()
-            output = model(x.cuda(0))
-            loss = criterion(output, y.cuda(0))
-            loss.backward()
-            optimizer.step()
-            acc = torch.sum(output.cpu().argmax(axis=1) == y) / y.size(0)
-            batch_tqdm.set_description(f'{loss:.3f} {acc:.3f}')
-        if epoch % ADVERSIAL_EVERY == ADVERSIAL_EVERY - 1 or epoch == len(epoch_tqdm) - 1:
-            batch_tqdm = tqdm(valloader, leave=False)
-            tot_loss, tot_acc = 0, 0
-            for x, y in batch_tqdm:
-                model.eval()
-                with torch.no_grad():
-                    output = model(x.cuda(0))
-                    loss = float(criterion(output, y.cuda(0)))
-                    acc = float(torch.sum(output.cpu().argmax(axis=1) == y))
-                    tot_loss += loss * x.size(0)
-                    tot_acc += acc
-            raw_loss, raw_acc = tot_loss / len(val_x), tot_acc / len(val_x)
-            epoch_tqdm.set_description(f'{raw_loss:.3f} {raw_acc:.3f}')
-    val_x_adv = np.zeros_like(val_x)
-    for i in tqdm(range(0, len(val_x_adv), BATCH_SIZE), desc='DF: ', leave=False):
-        val_x_adv[i:][:BATCH_SIZE] = pgd_op(val_x[i:][:BATCH_SIZE], 0.01)
-    adv_valset = torch.utils.data.TensorDataset(torch.tensor(val_x_adv, dtype=torch.float), torch.tensor(val_y, dtype=torch.long))
-    adv_valloader = torch.utils.data.DataLoader(adv_valset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
-    batch_tqdm = tqdm(adv_valloader, leave=False)
-    tot_acc = 0
+    optimizer = optim.SGD(model.parameters(), lr=1e-3)
+    raw_optimizer = optim.SGD(raw_model.parameters(), lr=1e-3)
+    train_x_adv = attack_train(train_x)
+    adv_trainset = torch.utils.data.TensorDataset(torch.tensor(train_x_adv, dtype=torch.float), torch.tensor(train_y, dtype=torch.long))
+    adv_trainloader = torch.utils.data.DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+    if load_dict:
+        model.load_state_dict(torch.load('eval_runs/model.pt'))
+        optimizer.load_state_dict(torch.load('eval_runs/optimizer.pt'))
+        raw_model.load_state_dict(torch.load('eval_runs/raw_model.pt'))
+        raw_optimizer.load_state_dict(torch.load('eval_runs/raw_optimizer.pt'))
+    model.train()
+    batch_tqdm = tqdm(adv_trainloader, leave=False)
     for x, y in batch_tqdm:
+        optimizer.zero_grad()
+        output = model(x.cuda(0))
+        loss = criterion(output, y.cuda(0))
+        loss.backward()
+        optimizer.step()
+        acc = torch.sum(output.cpu().argmax(axis=1) == y) / y.size(0)
+        batch_tqdm.set_description(f'adv {loss:.3f} {acc:.3f}')
+    batch_tqdm = tqdm(trainloader, leave=False)
+    raw_model.train()
+    for x, y in batch_tqdm:
+        raw_optimizer.zero_grad()
+        output = raw_model(x.cuda(0))
+        loss = criterion(output, y.cuda(0))
+        loss.backward()
+        raw_optimizer.step()
+        acc = torch.sum(output.cpu().argmax(axis=1) == y) / y.size(0)
+        batch_tqdm.set_description(f'raw {loss:.3f} {acc:.3f}')
+    with torch.no_grad():
         model.eval()
-        with torch.no_grad():
+        batch_tqdm = tqdm(valloader, leave=False)
+        tot_acc = 0
+        for x, y in batch_tqdm:
             output = model(x.cuda(0))
             acc = float(torch.sum(output.cpu().argmax(axis=1) == y))
             tot_acc += acc
-    adv_acc = tot_acc / len(val_x)
-    torch.save(model.state_dict(), f'runs/{num}.pt')
-    return raw_acc, adv_acc
+        adv_raw_acc = tot_acc / len(val_x)
+        val_x_adv = np.zeros_like(val_x)
+        for i in tqdm(range(0, len(val_x_adv), BATCH_SIZE), desc='PGD: ', leave=False):
+            val_x_adv[i:][:BATCH_SIZE] = pgd_op(val_x[i:][:BATCH_SIZE], 0.01)
+        adv_valset = torch.utils.data.TensorDataset(torch.tensor(val_x_adv, dtype=torch.float), torch.tensor(val_y, dtype=torch.long))
+        adv_valloader = torch.utils.data.DataLoader(adv_valset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
+        batch_tqdm = tqdm(adv_valloader, leave=False)
+        tot_acc = 0
+        for x, y in batch_tqdm:
+            output = model(x.cuda(0))
+            acc = float(torch.sum(output.cpu().argmax(axis=1) == y))
+            tot_acc += acc
+        adv_adv_acc = tot_acc / len(val_x)
+        raw_model.eval()
+        batch_tqdm = tqdm(valloader, leave=False)
+        tot_acc = 0
+        for x, y in batch_tqdm:
+            output = raw_model(x.cuda(0))
+            acc = float(torch.sum(output.cpu().argmax(axis=1) == y))
+            tot_acc += acc
+        raw_raw_acc = tot_acc / len(val_x)
+        val_x_adv = np.zeros_like(val_x)
+        for i in tqdm(range(0, len(val_x_adv), BATCH_SIZE), desc='PGD: ', leave=False):
+            val_x_adv[i:][:BATCH_SIZE] = pgd_raw_op(val_x[i:][:BATCH_SIZE], 0.01)
+        adv_valset = torch.utils.data.TensorDataset(torch.tensor(val_x_adv, dtype=torch.float), torch.tensor(val_y, dtype=torch.long))
+        adv_valloader = torch.utils.data.DataLoader(adv_valset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
+        batch_tqdm = tqdm(adv_valloader, leave=False)
+        tot_acc = 0
+        for x, y in batch_tqdm:
+            output = raw_model(x.cuda(0))
+            acc = float(torch.sum(output.cpu().argmax(axis=1) == y))
+            tot_acc += acc
+        raw_adv_acc = tot_acc / len(val_x)
+    with open('eval_runs/acc.csv', 'a') as f:
+        f.write(f'{adv_raw_acc},{adv_adv_acc},{raw_raw_acc},{raw_adv_acc}\n')
+    print(f'adv {adv_raw_acc:.3f} -> {adv_adv_acc:.3f} | raw {raw_raw_acc:.3f} -> {raw_adv_acc:.3f}')
+    torch.save(model.state_dict(), 'eval_runs/model.pt')
+    torch.save(optimizer.state_dict(), 'eval_runs/optimizer.pt')
+    torch.save(raw_model.state_dict(), 'eval_runs/raw_model.pt')
+    torch.save(raw_optimizer.state_dict(), 'eval_runs/raw_optimizer.pt')
 
-class Policy(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.embed = nn.Embedding(SUBPOLICY_COUNT * OPERATION_COUNT, 10)
-        self.fc1 = nn.Linear(10, 32)
-        self.relu = nn.ReLU()
-        self.fc_type = nn.Linear(32, TYPE_COUNT)
-        self.fc_prob = nn.Linear(32, PROB_COUNT)
-        self.fc_magn = nn.Linear(32, MAGN_COUNT)
-        self.softmax_type = nn.Softmax(dim=-1)
-        self.softmax_prob = nn.Softmax(dim=-1)
-        self.softmax_magn = nn.Softmax(dim=-1)
-        self.policy_history = Variable(torch.Tensor())
-        self.reward_history = []
-    def forward(self, x):
-        x = self.embed(x)
-        x = self.fc1(x)
-        x = self.relu(x)
-        t = self.softmax_type(self.fc_type(x))
-        p = self.softmax_prob(self.fc_prob(x))
-        m = self.softmax_magn(self.fc_magn(x))
-        return t, p, m
-
-policy = Policy()
-policy_optimizer = optim.Adam(policy.parameters(), lr=1e-2)
-
-def select_action(num=0):
-    t, p, m = policy(torch.tensor(range(SUBPOLICY_COUNT * OPERATION_COUNT), dtype=torch.long))
-    print(t, p, m)
-    tc, pc, mc = Categorical(t), Categorical(p), Categorical(m)
-    t, p, m = tc.sample(), pc.sample(), mc.sample()
-    def trans(x):
-        return x.detach().cpu().numpy().reshape((SUBPOLICY_COUNT, OPERATION_COUNT, -1)).tolist()
-    raw_acc, adv_acc = train_child(trans(t), trans(p), trans(m), num)
-    if num > 2:
-        global min_acc, max_acc
-        min_acc = min(min_acc, adv_acc)
-        max_acc = max(max_acc, adv_acc)
-        scale = (adv_acc - min_acc) / max(max_acc - min_acc, 1e-3)
-        loss = -adv_acc * scale * (tc.log_prob(t).sum() + pc.log_prob(p).sum() + mc.log_prob(m).sum())
-        policy_optimizer.zero_grad()
-        loss.backward()
-        policy_optimizer.step()
-    with open('runs/controller.csv', 'a') as f:
-        f.write(f'{trans(t)},{trans(p)},{trans(m)},{raw_acc},{adv_acc}\n')
-
-if os.path.isfile('runs/controller_cnt.txt'):
-    policy.load_state_dict(torch.load('runs/controller.pt'))
-    policy_optimizer.load_state_dict(torch.load('runs/controller_optimizer.pt'))
-    with open('runs/controller_cnt.txt') as f:
-        num, min_acc, max_acc = map(eval, f.read().split(','))
-else:
-    with open('runs/controller.csv', 'w') as f:
+load_dict = os.path.isfile('eval_runs/model.pt')
+if not load_dict:
+    with open('eval_runs/acc.csv', 'w') as f:
         pass
-    num, min_acc, max_acc = 0, 1., 0.
-select_action(num)
-torch.save(policy.state_dict(), 'runs/controller.pt')
-torch.save(policy_optimizer.state_dict(), 'runs/controller_optimizer.pt')
-with open('runs/controller_cnt.txt', 'w') as f:
-    f.write(f'{num + 1},{min_acc},{max_acc}')
+train_child([[[0], [2]], [[1], [0]], [[1], [2]]],[[[7], [0]], [[4], [8]], [[7], [4]]],[[[5], [2]], [[4], [2]], [[5], [9]]], load_dict=load_dict)
